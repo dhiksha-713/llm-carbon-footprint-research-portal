@@ -43,4 +43,5 @@ Structured prompts significantly improve grounding, citation accuracy, and forma
 
 ## Authors
 Dhiksha Rathis and Shreya Verma 
+
 Carnegie Mellon University
