@@ -30,13 +30,6 @@ How do we accurately measure and compare the carbon footprint of different LLMs 
 * GPT-5
 * Gemini 3
 
-## Project Structure
-
-* `docs/` – Framing brief, evaluation sheet, prompt kit
-* `prompts/` – Baseline and structured prompts
-* `results/` – Model outputs and evaluation scores
-* `notebooks/` – Analysis and comparison
-
 ## Key Finding
 
 Structured prompts significantly improve grounding, citation accuracy, and format compliance across all models.
