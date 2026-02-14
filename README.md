@@ -1,6 +1,6 @@
 # LLM Carbon Footprint Study (Green AI)
 
-This project evaluates how accurately large language models report and synthesize information about their carbon footprint and energy usage.
+This project uses a RAG based approach to evaluate how accurately large language models report and synthesize information about their carbon footprint and energy usage.
 
 ## Domain
 
@@ -42,5 +42,5 @@ How do we accurately measure and compare the carbon footprint of different LLMs 
 Structured prompts significantly improve grounding, citation accuracy, and format compliance across all models.
 
 ## Authors
-
-Group 4 – AI Model Development
+Dhiksha Rathis and Shreya Verma 
+Carnegie Mellon University
