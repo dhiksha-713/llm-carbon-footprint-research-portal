@@ -45,21 +45,34 @@ EVAL_QUERIES: list[dict] = [
 
 def _judge(client: LLMClient, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -> dict:
     resp = client.generate(prompt, temperature=JUDGE_TEMPERATURE, max_tokens=max_tokens)
-    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip()
+    raw = resp.text or ""
+    text = re.sub(r"```(?:json)?\s*", "", raw).strip()
+
+    # 1. Direct JSON parse
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         pass
-    m = re.search(r"\{[^{}]*\"score\"\s*:\s*\d[^{}]*\}", text)
+
+    # 2. Extract JSON object containing "score" from surrounding prose
+    m = re.search(r"\{[^{}]*['\"]score['\"].*?\}", text, re.DOTALL)
     if m:
         try:
             return json.loads(m.group())
         except (json.JSONDecodeError, TypeError):
             pass
-    m = re.search(r"\"score\"\s*:\s*(\d+)", text)
+
+    # 3. Regex: "score": 3 or 'score': 3 (inside JSON-like text)
+    m = re.search(r"""['\"]score['\"]\s*:\s*(\d+)""", text)
     if m:
-        return {"score": int(m.group(1)), "reasoning": "Extracted from non-JSON response"}
-    return {"score": None, "reasoning": "JSON parse error"}
+        return {"score": int(m.group(1)), "reasoning": "Extracted from partial JSON"}
+
+    # 4. Plain-text: Score: 3 or score: 3/4 (no JSON at all)
+    m = re.search(r"(?i)\bscore\b\s*[:=]\s*(\d)", text)
+    if m:
+        return {"score": int(m.group(1)), "reasoning": "Extracted from plain-text response"}
+
+    return {"score": None, "reasoning": f"Unparseable response: {raw[:200]}"}
 
 
 def score_groundedness(answer: str, chunks: list[dict], client: LLMClient) -> dict:
