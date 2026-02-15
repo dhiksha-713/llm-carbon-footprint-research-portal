@@ -1,7 +1,8 @@
 # LLM Carbon Footprint Research Portal
 
-Research-grade RAG system that answers questions about AI carbon emissions using 20 peer-reviewed papers.
-Every claim is cited; every citation is validated against retrieved source text.
+Research-grade RAG system that answers questions about the environmental cost of large AI models
+using 20 peer-reviewed academic papers. Every claim is cited; every citation is validated against
+the actually-retrieved source text.
 
 **Course**: AI Model Development (95-864) | **Group 4**: Dhiksha Rathis, Shreya Verma | CMU Spring 2026
 
@@ -9,28 +10,36 @@ Every claim is cited; every citation is validated against retrieved source text.
 
 ## Quick Start
 
+### macOS / Linux
+
 ```bash
-# 1. Clone and create virtual environment
 git clone <repo-url> && cd llm-carbon-footprint-research-portal
-python3 -m venv venv && source venv/bin/activate
-
-# 2. Install dependencies
-make install
-
-# 3. Configure API keys
-cp .env.example .env   # then edit .env with your keys
-
-# 4. Build the knowledge base (download PDFs, chunk, embed, index)
-make download && make ingest
-
-# 5. Launch the interactive UI
-make ui                # opens http://localhost:8501
-
-# 6. Or run a single query from the command line
-make query             # produces retrieval results + cited answer + saved log entry
+python3 -m venv venv
+source venv/bin/activate
+make install                      # pip install -r requirements.txt
+cp .env.example .env              # then edit .env with your API keys
+make download && make ingest      # download PDFs, build FAISS index
+make ui                           # http://localhost:8501
 ```
 
-The Streamlit **Demo All Deliverables** page automates steps 4-6 in one click (auto-downloads PDFs and builds the index if missing).
+### Windows (PowerShell)
+
+```powershell
+git clone <repo-url>; cd llm-carbon-footprint-research-portal
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env            # then edit .env with your API keys
+python -m src.ingest.download_sources
+python -m src.ingest.ingest
+python -m streamlit run src/app/streamlit_ui.py --server.port 8501
+```
+
+### One-Click Alternative
+
+Skip steps 4-5 above. Open the Streamlit UI, go to **Demo All Deliverables**, check "Fresh start",
+and click **Run Complete Demo**. It downloads PDFs, validates them, builds the index, runs baseline
+and enhanced RAG, model comparison, full 20-query evaluation, and generates the report automatically.
 
 ---
 
@@ -38,15 +47,15 @@ The Streamlit **Demo All Deliverables** page automates steps 4-6 in one click (a
 
 ```
 User Query
-  |-> Sanitize (prompt-injection check, length limit)
-  |-> Classify (direct / synthesis / multihop / edge-case)
+  |-> Sanitize (prompt-injection check, 1000-char limit, control-char strip)
+  |-> Classify (direct / synthesis / multihop / edge_case by keyword rules)
   |-> Retrieve
-  |     +-- Baseline: embed query -> FAISS top-K
-  |     +-- Enhanced: rewrite query + decompose into sub-queries -> multi-retrieve -> merge top-N
-  |-> Generate (LLM with strict citation rules)
+  |     +-- Baseline: embed query -> FAISS top-5 cosine search
+  |     +-- Enhanced: rewrite + decompose into sub-queries -> multi-retrieve -> merge top-8
+  |-> Generate (LLM with strict citation rules, no output token cap)
   |-> Validate (each (source_id, chunk_id) checked against retrieved set)
-  |-> Log (appended to logs/rag_runs.jsonl)
-  +-> Answer with inline citations + reference list
+  |-> Log (JSONL entry appended to logs/rag_runs.jsonl)
+  +-> Cited answer with reference list
 ```
 
 ---
@@ -58,24 +67,26 @@ User Query
 | Grok-3 (CMU LLM API) | `grok-3` | `openai.OpenAI` | `https://cmu-llm-api-resource.services.ai.azure.com/openai/v1/` |
 | Azure OpenAI | `o4-mini` | `openai.AzureOpenAI` | Azure resource endpoint |
 
-Providers are switchable at runtime via the Streamlit sidebar. The **Compare Models** page runs both simultaneously on the same query and displays answers side-by-side with latency, citation quality, and token usage.
+Switch providers at runtime in the Streamlit sidebar. **Compare Models** page runs both on the
+same query side-by-side with latency, citation quality, and token usage.
 
 ### .env configuration
 
 Copy `.env.example` to `.env` and fill in your keys:
 
 ```env
-LLM_PROVIDER=grok              # default provider (grok or azure_openai)
+LLM_PROVIDER=grok                  # default provider: grok or azure_openai
 GROK_API_KEY=<your-key>
 GROK_ENDPOINT=https://cmu-llm-api-resource.services.ai.azure.com/openai/v1/
 GROK_MODEL=grok-3
 AZURE_API_KEY=<your-key>
 AZURE_ENDPOINT=https://<resource>.openai.azure.com/
-AZURE_MODEL=o4-mini
 AZURE_API_VERSION=2024-12-01-preview
+AZURE_MODEL=o4-mini
 ```
 
-All configuration lives in `src/config.py`, driven entirely by environment variables. Nothing is hardcoded.
+All config lives in `src/config.py`, driven entirely by environment variables. Nothing is hardcoded.
+See `.env.example` for the full list of tunable parameters (temperatures, chunk sizes, thresholds).
 
 ---
 
@@ -83,27 +94,27 @@ All configuration lives in `src/config.py`, driven entirely by environment varia
 
 | # | Deliverable | Implementation | Verified by |
 |---|-------------|----------------|-------------|
-| D1 | Code repository | Modular Python (`src/`), Makefile automation | File checks in Demo page |
-| D2 | Data manifest | 20 sources with metadata | `data/data_manifest.csv` |
-| D3 | RAG pipeline | Baseline top-K + enhanced (rewrite, decompose, merge) | `make query`, Demo page |
-| D4 | Evaluation framework | 20 queries, 6 metrics, LLM-as-judge | `make eval-both` |
-| D5 | Evaluation report | Auto-generated Markdown with failure cases | `make report` |
+| D1 | Code repository | Modular Python (`src/`), Makefile automation | Step 9 in Demo page |
+| D2 | Data manifest | 20 sources with metadata, PDF validation | `data/data_manifest.csv` |
+| D3 | RAG pipeline | Baseline top-5 + enhanced (rewrite, decompose, merge top-8) | `make query`, Steps 4-5 |
+| D4 | Evaluation framework | 20 queries, 6 metrics, LLM-as-judge | `make eval-both`, Step 7 |
+| D5 | Evaluation report | Markdown with per-query logs and failure cases | `make report`, Step 8 |
 | D6 | API backend | FastAPI: `/health`, `/query`, `/corpus`, `/evaluation`, `/logs` | `make serve` |
 | D7 | Interactive UI | Streamlit, 5 pages | `make ui` |
-| D8 | Model comparison | Grok-3 vs Azure side-by-side with metrics | Compare Models page |
-| D9 | Security | Sanitization, injection detection, key isolation | Demo page live test |
+| D8 | Model comparison | Grok-3 vs Azure side-by-side with metrics table | Compare Models page, Step 6 |
+| D9 | Security | Sanitization, injection detection, key isolation | Step 10 live test |
 
 ---
 
-## Streamlit UI
+## Streamlit UI (5 Pages)
 
 | Page | Purpose |
 |------|---------|
-| **Home** | Project overview, deliverable checklist, corpus table, pipeline explanation |
-| **Ask a Question** | Chat interface - pick baseline/enhanced mode, top-K slider, cited answers |
+| **Home** | Project overview, deliverable table, pipeline diagram, corpus table (20 papers) |
+| **Ask a Question** | Chat interface - pick baseline/enhanced, top-K slider, sample questions, cited answers |
 | **Compare Models** | Same query through Grok-3 and Azure side-by-side with comparison table |
-| **Evaluation** | Browse the 20-query test set and all scored results |
-| **Demo All Deliverables** | One-click: downloads PDFs if missing, builds index, runs baseline + enhanced RAG, model comparison, full 20-query evaluation (both modes), generates report with download |
+| **Evaluation** | Browse the 20-query test set and scored results (baseline + enhanced) |
+| **Demo All Deliverables** | One-click end-to-end: clean slate, download + validate PDFs, ingest, baseline RAG, enhanced RAG, model comparison, 20-query eval (both modes), report generation, code/security checks |
 
 ---
 
@@ -111,39 +122,41 @@ All configuration lives in `src/config.py`, driven entirely by environment varia
 
 ```
 src/
-  config.py                    # Centralized configuration (all env-driven)
-  llm_client.py                # Provider-agnostic LLM abstraction
-  utils.py                     # Sanitization, citation regex, chunk formatting, averages
+  config.py                    # Centralized config (all env-driven, auto-creates dirs)
+  llm_client.py                # Provider-agnostic LLM abstraction (GrokClient, AzureOpenAIClient)
+  utils.py                     # Sanitization, citation regex, chunk formatting, eval loader
   ingest/
-    download_sources.py        # Download + validate PDFs (checks title against first page)
+    download_sources.py        # Download PDFs + validate title against first-page text
     ingest.py                  # Parse PDFs -> section-aware chunking -> embed -> FAISS index
   rag/
     rag.py                     # Baseline RAG: retrieve, generate, validate citations, log
-    enhance_query_rewriting.py # Enhanced RAG: rewrite + decompose + multi-retrieve + synthesize
+    enhance_query_rewriting.py # Enhanced RAG: classify, rewrite, decompose, multi-retrieve, synthesize
   eval/
-    evaluation.py              # 20-query eval set, LLM-as-judge scoring, metrics
-    generate_report.py         # Comprehensive Markdown report with failure analysis
+    evaluation.py              # 20-query eval set, LLM-as-judge (4-layer parse), 6 metrics
+    generate_report.py         # Markdown report: results, per-query logs, failure cases
   app/
-    app.py                     # FastAPI backend (5 endpoints)
-    streamlit_ui.py            # Streamlit interactive UI (5 pages)
+    app.py                     # FastAPI backend (7 endpoints, Pydantic validation, CORS)
+    streamlit_ui.py            # Streamlit UI (5 pages, cached resources, PDF export)
 data/
-  data_manifest.csv            # 20-source metadata (source_id, title, year, URL, venue)
-  raw/                         # Downloaded PDFs (git-ignored)
-  processed/                   # FAISS index + chunk store (git-ignored, rebuilt by make ingest)
-logs/                          # Run logs in JSONL (git-ignored)
-outputs/                       # Evaluation result JSONs (git-ignored)
-report/phase2/                 # Generated evaluation report (git-ignored)
+  data_manifest.csv            # 20 sources: source_id, title, authors, year, URL, venue, tags
+  raw/                         # Downloaded PDFs (git-ignored, validated after download)
+  processed/                   # chunk_store.json + faiss_index.bin (git-ignored, rebuilt by ingest)
+logs/                          # rag_runs.jsonl (git-ignored)
+outputs/                       # eval_results_*.json (git-ignored)
+report/phase2/                 # evaluation_report.md (git-ignored)
 ```
 
 ---
 
-## Makefile Targets
+## Commands
+
+### Makefile (macOS / Linux)
 
 | Target | What it does |
 |--------|-------------|
 | `make install` | `pip install -r requirements.txt` |
-| `make download` | Download 20 PDFs from manifest URLs |
-| `make ingest` | Parse, chunk, embed, build FAISS index (fresh each run) |
+| `make download` | Download 20 PDFs, validate each against manifest title |
+| `make ingest` | Parse PDFs, chunk (500t/100t overlap), embed, build FAISS index |
 | `make query` | Single query: prints retrieval results + cited answer + log path |
 | `make eval-baseline` | Run 20-query evaluation (baseline mode) |
 | `make eval-enhanced` | Run 20-query evaluation (enhanced mode) |
@@ -152,8 +165,38 @@ report/phase2/                 # Generated evaluation report (git-ignored)
 | `make serve` | Start FastAPI backend on port 8000 |
 | `make ui` | Start Streamlit UI on port 8501 |
 | `make all` | Full pipeline: install, download, ingest, eval-both, report |
-| `make clean` | Remove generated artifacts (index, logs, outputs, report) |
-| `make clean-all` | Also remove downloaded PDFs - next run re-downloads everything |
+| `make clean` | Remove index, logs, outputs, report (keep PDFs) |
+| `make clean-all` | Also remove downloaded PDFs (full fresh start) |
+
+### Windows equivalents (PowerShell)
+
+```powershell
+# Install
+pip install -r requirements.txt
+
+# Download + ingest
+python -m src.ingest.download_sources
+python -m src.ingest.ingest
+
+# Single query
+python -m src.rag.rag --query "What are the major sources of carbon emissions in LLM training?"
+
+# Evaluation
+python -m src.eval.evaluation --mode baseline
+python -m src.eval.evaluation --mode enhanced
+python -m src.eval.evaluation --mode both
+
+# Report
+python -m src.eval.generate_report
+
+# Servers
+python -m uvicorn src.app.app:app --host 0.0.0.0 --port 8000 --reload
+python -m streamlit run src/app/streamlit_ui.py --server.port 8501
+
+# Clean (PowerShell)
+Remove-Item -Recurse -Force data/processed, logs, outputs, report/phase2 -ErrorAction SilentlyContinue
+Remove-Item -Force data/raw/*.pdf -ErrorAction SilentlyContinue   # full clean
+```
 
 ---
 
@@ -163,7 +206,7 @@ report/phase2/                 # Generated evaluation report (git-ignored)
 
 | Category | IDs | Count | Tests |
 |----------|-----|:-----:|-------|
-| Direct | D01-D10 | 10 | Single-source factual retrieval, basic grounding and citation |
+| Direct | D01-D10 | 10 | Single-source factual retrieval, citation accuracy |
 | Synthesis | S01-S05 | 5 | Cross-source comparison, multi-source integration |
 | Edge Case | E01-E05 | 5 | Out-of-corpus detection, uncertainty handling |
 
@@ -178,42 +221,51 @@ report/phase2/                 # Generated evaluation report (git-ignored)
 | Source Recall | Deterministic | 0-1 | expected_sources_found / total_expected |
 | Uncertainty Handling | Rule-based | Y/N | Does answer flag missing evidence? |
 
-**Evaluation report** (`report/phase2/evaluation_report.md`) includes: system overview, query set design, metric definitions, baseline vs enhanced results with delta analysis, per-query detail logs (query, chunks, sources, judge reasoning, answer excerpts), and at least 3 representative failure cases with evidence and root cause analysis.
+**Thresholds**: PASS >= 3.5, WARN >= 2.5, FAIL < 2.5
+
+**Evaluation report** (`report/phase2/evaluation_report.md`) contains:
+1. System overview (corpus, chunking, embeddings, models)
+2. Query set design (full 20-query listing with expected sources)
+3. Metric definitions and thresholds
+4. Results (baseline + enhanced score tables, by-type breakdown, enhancement delta)
+5. Per-query detail logs (query, chunks, sources, judge reasoning, answer excerpts)
+6. Representative failure cases (min 3, auto-detected with evidence and root cause)
+7. Reproducibility commands
 
 ---
 
 ## Prompts
 
-All prompts are module-level constants. Each has a single responsibility and is independently tunable.
+All prompts are module-level constants, independently tunable.
 
-| Prompt | Location | Purpose | Key rules |
-|--------|----------|---------|-----------|
-| **Baseline System** | `rag.py:SYSTEM_PROMPT` | Generation with citation rules | Use ONLY context; cite as `(source_id, chunk_id)`; flag missing evidence; preserve hedging; end with reference list |
-| **Decompose** | `enhance_query_rewriting.py:_DECOMPOSE_INSTRUCTION` | Break complex queries into 2-4 sub-queries | Output ONLY JSON array of strings |
-| **Rewrite** | `enhance_query_rewriting.py:_REWRITE_INSTRUCTION` | Optimize query for academic retrieval | Domain-specific terms, under 20 words |
-| **Synthesis** | `enhance_query_rewriting.py:_SYNTHESIS_INSTRUCTION` | Merge multi-source evidence | Same citation rules as baseline + explicit conflict flagging `[CONFLICT: ...]` |
-| **Judge: Groundedness** | `evaluation.py:score_groundedness` | Score answer grounding (1-4) | Returns JSON with score, reasoning, unsupported_claims list |
-| **Judge: Relevance** | `evaluation.py:score_answer_relevance` | Score answer relevance (1-4) | Returns JSON with score, reasoning |
-| **Judge: Context Precision** | `evaluation.py:score_context_precision` | Score retrieval usefulness (1-4) | Returns JSON with score, reasoning |
+| Prompt | Location | Purpose |
+|--------|----------|---------|
+| Baseline System | `rag.py:SYSTEM_PROMPT` | Strict citation rules, no fabrication, flag missing evidence |
+| Decompose | `enhance_query_rewriting.py:_DECOMPOSE_INSTRUCTION` | Break complex queries into 2-4 sub-queries (JSON output) |
+| Rewrite | `enhance_query_rewriting.py:_REWRITE_INSTRUCTION` | Optimize query for academic retrieval (< 20 words) |
+| Synthesis | `enhance_query_rewriting.py:_SYNTHESIS_INSTRUCTION` | Merge multi-source evidence with conflict flagging |
+| Judge: Groundedness | `evaluation.py:score_groundedness` | Score 1-4 + reasoning + unsupported_claims list |
+| Judge: Relevance | `evaluation.py:score_answer_relevance` | Score 1-4 + reasoning |
+| Judge: Context Precision | `evaluation.py:score_context_precision` | Score 1-4 + reasoning |
 
 **Design choices**:
-- `temperature=0.0` for judges (scoring consistency) vs `0.2` for generation (slight creativity)
+- `temperature=0.0` for judges (consistency), `0.2` for generation (slight creativity)
 - Strict `(source_id, chunk_id)` citation format enables deterministic validation
-- "Output ONLY JSON" enforced by a 4-layer fallback parser (direct parse, regex JSON extract, regex score extract, plain-text fallback)
-- Separate decompose/rewrite/synthesize prompts so each step can be tuned independently
+- "Output ONLY JSON" enforced by 4-layer fallback parser in `_judge()`
+- No output token cap on generation calls (judges/decompose/rewrite have specific limits)
 
 ---
 
 ## Data Handling
 
-- **20 sources**: 14 peer-reviewed papers, 3 technical reports, 3 tool/workshop papers (listed in `data/data_manifest.csv`)
-- **PDFs are git-ignored**: Downloaded on first run via `make download` or automatically by the Demo page
-- **PDF validation**: After download, each PDF's first-page text is checked against the expected title from the manifest. Mismatched PDFs (wrong paper) are deleted and flagged
+- **20 sources**: 14 peer-reviewed papers, 3 technical reports, 3 tool/workshop papers
+- **PDFs are git-ignored**: Downloaded on first run via `make download` or Demo page
+- **PDF validation**: After download, first 3 pages are checked against expected title (>= 40% word match). Mismatched PDFs are deleted and flagged
 - **Fresh ingestion**: `make ingest` clears `data/processed/` and rebuilds from scratch every time
-- **Chunk quality filter**: Chunks shorter than 50 characters are discarded during ingestion
-- **Chunking**: Section-aware sliding window, 500 tokens per chunk, 100-token overlap
-- **Embeddings**: `all-MiniLM-L6-v2` (384-dim), L2-normalized, stored in FAISS `IndexFlatIP` (cosine similarity)
-- **Logging**: Every RAG run appends a structured JSON entry to `logs/rag_runs.jsonl` with run_id, timestamp, query, retrieved chunks, answer, citations, and validation results
+- **Chunk quality filter**: Chunks < 50 characters are discarded during ingestion
+- **Chunking**: Section-aware sliding window, 500 tokens/chunk, 100-token overlap, `WORDS_PER_TOKEN=0.75`
+- **Embeddings**: `all-MiniLM-L6-v2` (384-dim), L2-normalized, FAISS `IndexFlatIP` (cosine similarity)
+- **Logging**: Every RAG run appends a structured JSON entry to `logs/rag_runs.jsonl`
 
 ---
 
@@ -222,26 +274,31 @@ All prompts are module-level constants. Each has a single responsibility and is 
 | Measure | Implementation |
 |---------|---------------|
 | API key isolation | Keys in `.env` (git-ignored), loaded via `python-dotenv`, never in source |
-| Prompt-injection detection | `sanitize_query()` rejects patterns like "ignore previous instructions" |
+| Prompt-injection detection | `sanitize_query()` rejects 10+ injection patterns (regex-based) |
 | Input length limit | Queries capped at 1000 characters |
 | Input sanitization | Control characters stripped at every entry point |
 | Pydantic validation | All FastAPI request bodies validated with schemas |
-| PDF exclusion | `data/raw/*.pdf` and all generated artifacts in `.gitignore` |
+| PDF/data exclusion | `data/raw/*.pdf`, `data/processed/`, `logs/`, `outputs/`, `report/` all in `.gitignore` |
 
 ---
 
 ## Acceptance Tests
 
-These are the checks a grader can run quickly:
+Quick checks a grader can run:
 
 1. **Single command produces retrieval + answer + log**:
-   `make query` prints `--- RETRIEVAL RESULTS ---`, `--- ANSWER WITH CITATIONS ---`, and `--- LOG ENTRY SAVED ---` with the file path.
+   `make query` (or `python -m src.rag.rag --query "..."`) prints three labeled sections:
+   `--- RETRIEVAL RESULTS ---`, `--- ANSWER WITH CITATIONS ---`, `--- LOG ENTRY SAVED ---`
 
 2. **Citations resolve to real source text**:
-   Every `(source_id, chunk_id)` in the answer is validated by `validate_citations()`. The output shows `Citations: X/Y valid | precision=Z`. Invalid citations are logged.
+   `validate_citations()` checks every `(source_id, chunk_id)` against retrieved chunks.
+   Output shows `Citations: X/Y valid | precision=Z`. Invalid citations are logged.
 
 3. **Evaluation report has 3+ failure cases with evidence**:
-   `make report` generates `report/phase2/evaluation_report.md` with auto-detected failures (low groundedness, hallucinated citations, missed sources, edge-case mishandling) plus weakest-scoring near-misses as fallback. Each includes: query, issues, all scores, judge reasoning, sources, answer excerpt, and root cause.
+   `make report` generates `report/phase2/evaluation_report.md` with auto-detected failures
+   (low groundedness, hallucinated citations, missed sources, edge-case mishandling) plus
+   weakest-scoring near-misses as fallback. Each includes query, scores, judge reasoning,
+   sources, answer excerpt, and root cause.
 
 ---
 
@@ -253,3 +310,22 @@ These are the checks a grader can run quickly:
 | Azure OpenAI (`o4-mini`) | RAG answer generation, model comparison |
 | sentence-transformers (`all-MiniLM-L6-v2`) | Document and query embeddings |
 | Cursor AI | Code scaffolding and development assistance |
+
+---
+
+## Dependencies
+
+```
+PyMuPDF>=1.25.0          # PDF text extraction
+sentence-transformers>=3.0.0  # Embedding model
+torch>=2.3.0             # ML backend
+faiss-cpu>=1.8.0         # Vector similarity search
+openai>=1.40.0           # Grok-3 + Azure OpenAI clients
+fastapi>=0.115.0         # REST API
+uvicorn>=0.32.0          # ASGI server
+streamlit>=1.38.0        # Interactive UI
+fpdf2>=2.7.0             # PDF report export
+pandas>=2.2.0            # Data tables
+numpy>=1.26.0            # Array operations
+python-dotenv>=1.0.0     # .env loading
+```
