@@ -12,8 +12,7 @@ from sentence_transformers import SentenceTransformer
 log = logging.getLogger(__name__)
 
 from src.config import (
-    GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS, TOP_K, ENHANCED_TOP_N,
-    ENHANCED_PROMPT_VERSION, EMBED_MODEL_NAME,
+    TOP_K, ENHANCED_TOP_N, ENHANCED_PROMPT_VERSION, EMBED_MODEL_NAME,
     DECOMPOSE_TEMPERATURE, DECOMPOSE_MAX_TOKENS,
     REWRITE_TEMPERATURE, REWRITE_MAX_TOKENS, MAX_SUB_QUERIES,
 )
@@ -142,10 +141,7 @@ def run_enhanced_rag(
         "Synthesize the chunks to answer the original query. "
         "Cite every claim. Flag conflicts. End with REFERENCE LIST."
     )
-    resp = client.generate(
-        prompt, system=_SYNTHESIS_INSTRUCTION,
-        temperature=GENERATION_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS,
-    )
+    resp = client.generate(prompt, system=_SYNTHESIS_INSTRUCTION)
 
     cites = [{"source_id": s, "chunk_id": c} for s, c in CITE_RE.findall(resp.text)]
     cv = validate_citations(cites, merged)
@@ -166,7 +162,7 @@ def run_enhanced_rag(
         "citation_validation": cv,
         "tokens": {"input": resp.input_tokens, "output": resp.output_tokens},
     }
-    save_log(entry)
+    entry["_log_path"] = save_log(entry)
     return entry
 
 
@@ -182,12 +178,14 @@ def main() -> None:
     client = get_llm_client()
 
     if args.query:
-        print_result(run_enhanced_rag(args.query, index, store, embed_model, client))
+        result = run_enhanced_rag(args.query, index, store, embed_model, client)
+        print_result(result, log_path=result.get("_log_path"))
     elif args.eval:
         from src.eval.evaluation import EVAL_QUERIES
         for q in (q for q in EVAL_QUERIES if q["type"] in ("synthesis", "multihop")):
             print(f"\n[{q['id']}] {q['query'][:70]}...")
-            print_result(run_enhanced_rag(q["query"], index, store, embed_model, client))
+            result = run_enhanced_rag(q["query"], index, store, embed_model, client)
+            print_result(result, log_path=result.get("_log_path"))
     else:
         parser.print_help()
 

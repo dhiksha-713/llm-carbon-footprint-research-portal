@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 from src.config import (
     OUTPUTS_DIR, JUDGE_TEMPERATURE, EMBED_MODEL_NAME, TOP_K,
-    JUDGE_MAX_TOKENS, CHUNK_PREVIEW_LEN, MAX_OUTPUT_TOKENS,
+    JUDGE_MAX_TOKENS, CHUNK_PREVIEW_LEN,
 )
 from src.llm_client import LLMClient, get_llm_client
 from src.utils import safe_avg, chunk_preview_ctx
@@ -93,7 +93,7 @@ def score_groundedness(answer: str, chunks: list[dict], client: LLMClient) -> di
         "3 = Most supported, minor gap\n2 = Several claims lack grounding\n"
         "1 = Major fabrication\n\n"
         f"CONTEXT:\n{chunk_preview_ctx(chunks, TOP_K + 1)}\n\n"
-        f"ANSWER:\n{answer[:MAX_OUTPUT_TOKENS]}\n\n"
+        f"ANSWER:\n{answer}\n\n"
         'Output ONLY JSON: {"score": <1-4>, "reasoning": "<1-2 sentences>", "unsupported_claims": [...]}'
     )
     result = _judge(client, prompt)
@@ -104,7 +104,7 @@ def score_groundedness(answer: str, chunks: list[dict], client: LLMClient) -> di
 def score_answer_relevance(query: str, answer: str, client: LLMClient) -> dict:
     prompt = (
         "Does this answer address the research question?\n\n"
-        f"QUESTION: {query}\nANSWER: {answer[:MAX_OUTPUT_TOKENS]}\n\n"
+        f"QUESTION: {query}\nANSWER: {answer}\n\n"
         "Score 1-4:\n4 = Directly and completely addresses it\n"
         "3 = Mostly addresses, minor gap\n2 = Partially addresses\n"
         "1 = Does not address\n\n"
@@ -117,7 +117,7 @@ def score_context_precision(answer: str, chunks: list[dict], client: LLMClient) 
     prompt = (
         "How many of the retrieved chunks were actually useful for the answer?\n\n"
         f"RETRIEVED CHUNKS:\n{chunk_preview_ctx(chunks, TOP_K + 1)}\n\n"
-        f"ANSWER:\n{answer[:MAX_OUTPUT_TOKENS]}\n\n"
+        f"ANSWER:\n{answer}\n\n"
         "Score 1-4:\n4 = All chunks relevant\n3 = Most relevant\n"
         "2 = Half irrelevant\n1 = Mostly irrelevant\n\n"
         'Output ONLY JSON: {"score": <1-4>, "reasoning": "<1 sentence>"}'
@@ -179,7 +179,7 @@ def run_evaluation(mode: str = "baseline") -> list[dict]:
             "citations_total": cv.get("total_citations"),
             "citations_valid": cv.get("valid_citations"),
             "source_recall": src_rec,
-            "answer_preview": rr["answer"][:CHUNK_PREVIEW_LEN * 2],
+            "answer_text": rr["answer"],
             "retrieved_sources": ret_srcs,
             "expected_sources": q["expected_sources"],
         })

@@ -52,6 +52,42 @@ def _run_query(query, index, store, embed_model, client, mode, top_k=TOP_K):
 def _index_ready() -> bool:
     return (PROCESSED_DIR / "faiss_index.bin").exists() and (PROCESSED_DIR / "chunk_store.json").exists()
 
+def _report_to_pdf(md_text: str) -> bytes:
+    """Convert markdown report text to a simple PDF."""
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=10)
+    for line in md_text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            pdf.set_font("Helvetica", "B", 16)
+            pdf.cell(0, 10, stripped[2:], new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", size=10)
+        elif stripped.startswith("## "):
+            pdf.set_font("Helvetica", "B", 13)
+            pdf.cell(0, 9, stripped[3:], new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", size=10)
+        elif stripped.startswith("### "):
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.cell(0, 8, stripped[4:], new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", size=10)
+        elif stripped.startswith("---"):
+            pdf.cell(0, 4, "", new_x="LMARGIN", new_y="NEXT")
+        elif stripped.startswith("|"):
+            pdf.set_font("Courier", size=8)
+            pdf.cell(0, 5, stripped, new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", size=10)
+        elif stripped.startswith("```"):
+            continue
+        elif stripped:
+            clean = stripped.replace("**", "").replace("*", "")
+            pdf.multi_cell(0, 5, clean)
+        else:
+            pdf.cell(0, 3, "", new_x="LMARGIN", new_y="NEXT")
+    return pdf.output()
+
 SAMPLE_QUESTIONS = [
     "What are the major sources of carbon emissions in LLM training?",
     "What is the total lifecycle carbon footprint of BLOOM?",
@@ -271,7 +307,8 @@ elif page == "Compare Models":
                 gr, gt = _run_prov("Grok-3", GrokClient)
                 sg.update(label=f"Grok-3 ({gt:.1f}s)" if gt else "Failed", state="complete" if gr else "error")
             if gr:
-                st.markdown(gr["answer"][:500] + ("..." if len(gr["answer"]) > 500 else ""))
+                with st.expander("Full Grok-3 Answer", expanded=True):
+                    st.markdown(gr["answer"])
                 gcv = gr["citation_validation"]
                 st.metric("Latency", f"{gt:.1f}s")
                 st.metric("Citations", f"{gcv['valid_citations']}/{gcv['total_citations']}")
@@ -282,7 +319,8 @@ elif page == "Compare Models":
                 ar, at = _run_prov("Azure", AzureOpenAIClient)
                 sa.update(label=f"Azure ({at:.1f}s)" if at else "Failed", state="complete" if ar else "error")
             if ar:
-                st.markdown(ar["answer"][:500] + ("..." if len(ar["answer"]) > 500 else ""))
+                with st.expander("Full Azure Answer", expanded=True):
+                    st.markdown(ar["answer"])
                 acv = ar["citation_validation"]
                 st.metric("Latency", f"{at:.1f}s")
                 st.metric("Citations", f"{acv['valid_citations']}/{acv['total_citations']}")
@@ -392,7 +430,8 @@ elif page == "Demo All Deliverables":
             t0 = time.time()
             index, store, embed_model = _load_resources()
             client = _get_client(chosen)
-            s.update(label=f"Models loaded ({time.time() - t0:.1f}s)", state="complete")
+            s.update(label=f"Models loaded: {labels[chosen]}, embeddings={EMBED_MODEL_NAME} ({time.time() - t0:.1f}s)",
+                     state="complete")
 
         bq = "What are the major sources of carbon emissions in LLM training?"
         with st.status("D3: Baseline RAG...", expanded=True) as s:
@@ -402,8 +441,8 @@ elif page == "Demo All Deliverables":
             bt = time.time() - t0
             bcv = br["citation_validation"]
             st.write(f"{len(br['retrieved_chunks'])} chunks, {bcv['valid_citations']}/{bcv['total_citations']} cites, {bt:.1f}s")
-            with st.expander("Answer"):
-                st.markdown(br["answer"][:500] + "...")
+            with st.expander("Full Baseline Answer"):
+                st.markdown(br["answer"])
             s.update(label=f"D3: Baseline - {bt:.1f}s", state="complete")
 
         with st.status("D3: Enhanced RAG...", expanded=True) as s:
@@ -415,14 +454,15 @@ elif page == "Demo All Deliverables":
             ecv = er["citation_validation"]
             st.write(f"Type: {er.get('query_type')} | {len(er['retrieved_chunks'])} chunks | "
                      f"{ecv['valid_citations']}/{ecv['total_citations']} cites | {et:.1f}s")
-            with st.expander("Synthesis"):
-                st.markdown(er["answer"][:500] + "...")
+            with st.expander("Full Enhanced Synthesis"):
+                st.markdown(er["answer"])
             s.update(label=f"D3: Enhanced - {et:.1f}s", state="complete")
 
         if both:
-            with st.status("D8: Model comparison...", expanded=True) as s:
+            with st.status("D8: Model comparison (Grok-3 vs Azure side-by-side)...", expanded=True) as s:
                 from src.llm_client import GrokClient, AzureOpenAIClient
                 cq = "What tools exist for tracking carbon emissions during ML training?"
+                st.write(f"**Query**: {cq}")
                 def _try(cls):
                     try:
                         t0 = time.time()
@@ -431,33 +471,113 @@ elif page == "Demo All Deliverables":
                         st.warning(str(exc)); return None, None
                 g_r, g_t = _try(GrokClient)
                 a_r, a_t = _try(AzureOpenAIClient)
-                if g_r and a_r:
-                    st.dataframe(pd.DataFrame([
-                        {"": "Latency", "Grok-3": f"{g_t:.1f}s", "Azure": f"{a_t:.1f}s"},
-                        {"": "Citations", "Grok-3": str(g_r["citation_validation"]["valid_citations"]),
-                         "Azure": str(a_r["citation_validation"]["valid_citations"])},
-                    ]), width="stretch", hide_index=True)
-                s.update(label="D8: Comparison done", state="complete")
+                s.update(label="D8: Both models finished", state="complete")
+
+            if g_r and a_r:
+                col_g, col_a = st.columns(2)
+                gcv = g_r["citation_validation"]
+                acv = a_r["citation_validation"]
+                with col_g:
+                    st.subheader(f"Grok-3 ({GROK_MODEL})")
+                    st.caption(f"{g_t:.1f}s | {gcv['valid_citations']}/{gcv['total_citations']} citations | "
+                               f"precision {gcv.get('citation_precision', 'N/A')}")
+                    with st.expander("Full Grok-3 Answer", expanded=True):
+                        st.markdown(g_r["answer"])
+                    st.metric("Latency", f"{g_t:.1f}s")
+                    st.metric("Valid Citations", f"{gcv['valid_citations']}/{gcv['total_citations']}")
+                    st.metric("Output Tokens", g_r["tokens"].get("output", 0))
+                with col_a:
+                    st.subheader(f"Azure ({AZURE_MODEL})")
+                    st.caption(f"{a_t:.1f}s | {acv['valid_citations']}/{acv['total_citations']} citations | "
+                               f"precision {acv.get('citation_precision', 'N/A')}")
+                    with st.expander("Full Azure Answer", expanded=True):
+                        st.markdown(a_r["answer"])
+                    st.metric("Latency", f"{a_t:.1f}s")
+                    st.metric("Valid Citations", f"{acv['valid_citations']}/{acv['total_citations']}")
+                    st.metric("Output Tokens", a_r["tokens"].get("output", 0))
+
+                st.markdown("---")
+                st.markdown("**Head-to-head summary**")
+                gp = gcv.get("citation_precision")
+                ap = acv.get("citation_precision")
+                st.dataframe(pd.DataFrame([
+                    {"Metric": "Latency (s)", "Grok-3": f"{g_t:.1f}", "Azure": f"{a_t:.1f}",
+                     "Winner": "Grok-3" if g_t < a_t else "Azure"},
+                    {"Metric": "Valid Citations", "Grok-3": str(gcv["valid_citations"]),
+                     "Azure": str(acv["valid_citations"]),
+                     "Winner": "Grok-3" if gcv["valid_citations"] > acv["valid_citations"] else
+                               "Azure" if acv["valid_citations"] > gcv["valid_citations"] else "Tie"},
+                    {"Metric": "Citation Precision",
+                     "Grok-3": f"{gp:.2f}" if gp is not None else "N/A",
+                     "Azure": f"{ap:.2f}" if ap is not None else "N/A",
+                     "Winner": ("Grok-3" if (gp or 0) > (ap or 0) else
+                                "Azure" if (ap or 0) > (gp or 0) else "Tie")},
+                    {"Metric": "Output Tokens",
+                     "Grok-3": str(g_r["tokens"].get("output", 0)),
+                     "Azure": str(a_r["tokens"].get("output", 0)),
+                     "Winner": "-"},
+                ]), width="stretch", hide_index=True)
+            elif g_r or a_r:
+                only = g_r or a_r
+                st.warning("Only one model responded. Showing single result.")
+                st.markdown(only["answer"])
         else:
-            st.info("D8: Skipped (one provider).")
+            st.info("D8: Model comparison skipped (only one provider configured). "
+                    "Add both GROK_API_KEY and AZURE_API_KEY to `.env` for side-by-side comparison.")
 
-        with st.status("D4: Evaluation framework...", expanded=True) as s:
-            from src.eval.evaluation import EVAL_QUERIES, score_groundedness, score_answer_relevance
-            st.write(f"**{len(EVAL_QUERIES)} queries**, 6 metrics. Running LLM-judge...")
-            gs = score_groundedness(br["answer"], br["retrieved_chunks"], client)
-            rs = score_answer_relevance(bq, br["answer"], client)
-            c1, c2 = st.columns(2)
-            c1.metric("Groundedness", f"{gs.get('score', '?')}/4")
-            c2.metric("Relevance", f"{rs.get('score', '?')}/4")
-            s.update(label=f"D4: {len(EVAL_QUERIES)} queries, 6 metrics", state="complete")
+        with st.status("D4: Running full evaluation (20 queries x 2 modes)...", expanded=True) as s:
+            from src.eval.evaluation import EVAL_QUERIES, run_evaluation, compute_summary
+            baseline_results = load_eval_results("baseline")
+            if not baseline_results:
+                st.write(f"Running **{len(EVAL_QUERIES)}-query baseline** evaluation (this takes a few minutes)...")
+                baseline_results = run_evaluation("baseline")
+            else:
+                st.write(f"Loaded existing baseline results ({len(baseline_results)} queries).")
 
-        with st.status("D5: Evaluation report...", expanded=True) as s:
+            enhanced_results = load_eval_results("enhanced")
+            if not enhanced_results:
+                st.write(f"Running **{len(EVAL_QUERIES)}-query enhanced** evaluation...")
+                enhanced_results = run_evaluation("enhanced")
+            else:
+                st.write(f"Loaded existing enhanced results ({len(enhanced_results)} queries).")
+
+            bsm = compute_summary(baseline_results)["overall"]
+            esm = compute_summary(enhanced_results)["overall"]
+            st.markdown("**Baseline averages:**")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Groundedness", f"{bsm['avg_groundedness']}/4" if bsm["avg_groundedness"] else "-")
+            c2.metric("Relevance", f"{bsm['avg_relevance']}/4" if bsm["avg_relevance"] else "-")
+            c3.metric("Cite Precision", f"{bsm['avg_cite_precision']}" if bsm["avg_cite_precision"] else "-")
+            st.markdown("**Enhanced averages:**")
+            c4, c5, c6 = st.columns(3)
+            c4.metric("Groundedness", f"{esm['avg_groundedness']}/4" if esm["avg_groundedness"] else "-")
+            c5.metric("Relevance", f"{esm['avg_relevance']}/4" if esm["avg_relevance"] else "-")
+            c6.metric("Cite Precision", f"{esm['avg_cite_precision']}" if esm["avg_cite_precision"] else "-")
+            s.update(label=f"D4: {len(baseline_results)}+{len(enhanced_results)} queries evaluated (baseline+enhanced)",
+                     state="complete")
+
+        with st.status("D5: Generating evaluation report...", expanded=True) as s:
+            from src.eval.generate_report import generate_report
             rp = REPORT_DIR / "evaluation_report.md"
-            st.write("Found." if rp.exists() else "Not generated yet. Run `make report`.")
-            if rp.exists():
-                with st.expander("Report"):
-                    st.markdown(rp.read_text(encoding="utf-8")[:3000] + "\n...")
-            s.update(label=f"D5: {'Found' if rp.exists() else 'Pending'}", state="complete")
+            st.write("Generating fresh report from eval results...")
+            generate_report()
+            report_text = rp.read_text(encoding="utf-8") if rp.exists() else ""
+            if report_text:
+                st.write(f"Report ready ({len(report_text)} chars).")
+                with st.expander("Full Evaluation Report", expanded=False):
+                    st.markdown(report_text)
+                dl1, dl2 = st.columns(2)
+                dl1.download_button("Download Report (.md)", data=report_text,
+                                    file_name="evaluation_report.md", mime="text/markdown")
+                try:
+                    pdf_bytes = _report_to_pdf(report_text)
+                    dl2.download_button("Download Report (.pdf)", data=pdf_bytes,
+                                        file_name="evaluation_report.pdf", mime="application/pdf")
+                except Exception:
+                    dl2.caption("PDF generation unavailable. Install fpdf2.")
+            else:
+                st.warning("Report generation failed.")
+            s.update(label="D5: Report ready", state="complete")
 
         with st.status("D1: Code repository...", expanded=True) as s:
             files = ["src/config.py", "src/llm_client.py", "src/utils.py",
@@ -493,4 +613,4 @@ elif page == "Demo All Deliverables":
             s.update(label="D7: Disclosed", state="complete")
 
         st.success("All Phase 2 deliverables demonstrated.")
-        st.balloons()
+        # st.balloons()

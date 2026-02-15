@@ -14,9 +14,7 @@ from sentence_transformers import SentenceTransformer
 log = logging.getLogger(__name__)
 
 from src.config import (
-    PROCESSED_DIR, LOGS_DIR, TOP_K, EMBED_MODEL_NAME,
-    GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS,
-    BASELINE_PROMPT_VERSION, CHUNK_PREVIEW_LEN,
+    PROCESSED_DIR, LOGS_DIR, TOP_K, EMBED_MODEL_NAME, BASELINE_PROMPT_VERSION,
 )
 from src.llm_client import LLMClient, get_llm_client
 from src.utils import sanitize_query, CITE_RE, build_chunk_context, summarize_chunk
@@ -83,19 +81,19 @@ def generate_answer(query: str, chunks: list[dict], client: LLMClient) -> dict:
         "Cite every claim as (source_id, chunk_id). "
         "If evidence is insufficient, say so. End with a REFERENCE LIST."
     )
-    resp = client.generate(
-        prompt, system=SYSTEM_PROMPT,
-        temperature=GENERATION_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS,
-    )
+    resp = client.generate(prompt, system=SYSTEM_PROMPT)
     cites = [{"source_id": s, "chunk_id": c} for s, c in CITE_RE.findall(resp.text)]
     log.info("generate_answer -> %d citations extracted, answer_len=%d", len(cites), len(resp.text))
     return {"answer": resp.text, "citations_extracted": cites,
             "input_tokens": resp.input_tokens, "output_tokens": resp.output_tokens}
 
 
-def save_log(entry: dict) -> None:
-    with open(LOGS_DIR / "rag_runs.jsonl", "a", encoding="utf-8") as fh:
+def save_log(entry: dict) -> str:
+    log_path = LOGS_DIR / "rag_runs.jsonl"
+    with open(log_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    log.info("Log entry saved -> %s (run_id=%s)", log_path, entry.get("run_id", "?"))
+    return str(log_path)
 
 
 def run_rag(
@@ -125,18 +123,25 @@ def run_rag(
         "citation_validation": cv,
         "tokens": {"input": gen["input_tokens"], "output": gen["output_tokens"]},
     }
-    save_log(entry)
+    entry["_log_path"] = save_log(entry)
     return entry
 
 
-def print_result(result: dict) -> None:
-    print(f"\n{'=' * 70}\nQUERY: {result['query']}\n{'=' * 70}")
+def print_result(result: dict, log_path: str | None = None) -> None:
+    sep = "=" * 70
+    print(f"\n{sep}")
+    print(f"QUERY: {result['query']}")
+    print(sep)
+    print("\n--- RETRIEVAL RESULTS ---")
     for c in result["retrieved_chunks"]:
         print(f"  [{c['source_id']}, {c['chunk_id']}] score={c['retrieval_score']:.4f}")
-    print(f"\n{result['answer']}\n{'-' * 70}")
+    print(f"\n--- ANSWER WITH CITATIONS ---\n{result['answer']}")
+    print("-" * 70)
     cv = result["citation_validation"]
     print(f"Citations: {cv['valid_citations']}/{cv['total_citations']} "
           f"valid | precision={cv['citation_precision']}")
+    if log_path:
+        print(f"\n--- LOG ENTRY SAVED ---\n  {log_path}  (run_id: {result['run_id']})")
 
 
 def main() -> None:
@@ -151,12 +156,14 @@ def main() -> None:
     client = get_llm_client()
 
     if args.query:
-        print_result(run_rag(args.query, index, store, embed_model, client, args.top_k))
+        result = run_rag(args.query, index, store, embed_model, client, args.top_k)
+        print_result(result, log_path=result.get("_log_path"))
     elif args.eval:
         from src.eval.evaluation import EVAL_QUERIES
         for i, q in enumerate(EVAL_QUERIES, 1):
             print(f"\n[{i}/{len(EVAL_QUERIES)}] {q['type']}: {q['query'][:70]}...")
-            print_result(run_rag(q["query"], index, store, embed_model, client, args.top_k))
+            result = run_rag(q["query"], index, store, embed_model, client, args.top_k)
+            print_result(result, log_path=result.get("_log_path"))
     else:
         parser.print_help()
 

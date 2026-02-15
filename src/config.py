@@ -39,7 +39,6 @@ AZURE_MODEL       = os.getenv("AZURE_MODEL", "o4-mini")
 # ── Generation ───────────────────────────────────────────────────────────
 GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.2"))
 JUDGE_TEMPERATURE      = float(os.getenv("JUDGE_TEMPERATURE", "0.0"))
-MAX_OUTPUT_TOKENS      = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
 JUDGE_MAX_TOKENS       = int(os.getenv("JUDGE_MAX_TOKENS", "300"))
 DECOMPOSE_MAX_TOKENS   = int(os.getenv("DECOMPOSE_MAX_TOKENS", "300"))
 REWRITE_MAX_TOKENS     = int(os.getenv("REWRITE_MAX_TOKENS", "100"))

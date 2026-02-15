@@ -43,7 +43,7 @@ class GrokClient(LLMClient):
         model: str | None = None, temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
-        from src.config import GROK_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
+        from src.config import GROK_MODEL, GENERATION_TEMPERATURE
 
         msgs: list[dict[str, str]] = []
         if system:
@@ -51,14 +51,16 @@ class GrokClient(LLMClient):
         msgs.append({"role": "user", "content": prompt})
 
         used_model = model or GROK_MODEL
-        log.info("GrokClient.generate model=%s temp=%s max_tokens=%s prompt_len=%d",
-                 used_model, temperature, max_tokens, len(prompt))
-        resp = self._client.chat.completions.create(
-            model=used_model,
-            messages=msgs,
-            temperature=temperature if temperature is not None else GENERATION_TEMPERATURE,
-            max_tokens=max_tokens or MAX_OUTPUT_TOKENS,
-        )
+        log.info("GrokClient.generate model=%s max_tokens=%s prompt_len=%d",
+                 used_model, max_tokens, len(prompt))
+        kwargs: dict = {
+            "model": used_model,
+            "messages": msgs,
+            "temperature": temperature if temperature is not None else GENERATION_TEMPERATURE,
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        resp = self._client.chat.completions.create(**kwargs)
         u = resp.usage
         r = LLMResponse(
             text=resp.choices[0].message.content or "",
@@ -89,11 +91,10 @@ class AzureOpenAIClient(LLMClient):
         model: str | None = None, temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
-        from src.config import AZURE_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
+        from src.config import AZURE_MODEL, GENERATION_TEMPERATURE
 
         deploy = model or AZURE_MODEL
         temp = temperature if temperature is not None else GENERATION_TEMPERATURE
-        tokens = max_tokens or MAX_OUTPUT_TOKENS
 
         msgs: list[dict[str, str]] = []
         if system:
@@ -102,12 +103,15 @@ class AzureOpenAIClient(LLMClient):
 
         kwargs: dict = {"model": deploy, "messages": msgs}
         if deploy.startswith("o"):
-            kwargs["max_completion_tokens"] = tokens
+            if max_tokens is not None:
+                kwargs["max_completion_tokens"] = max_tokens
         else:
             kwargs["temperature"] = temp
-            kwargs["max_tokens"] = tokens
+            if max_tokens is not None:
+                kwargs["max_tokens"] = max_tokens
 
-        log.info("AzureOpenAIClient.generate model=%s prompt_len=%d", deploy, len(prompt))
+        log.info("AzureOpenAIClient.generate model=%s max_tokens=%s prompt_len=%d",
+                 deploy, max_tokens, len(prompt))
         resp = self._client.chat.completions.create(**kwargs)
         u = resp.usage
         r = LLMResponse(
