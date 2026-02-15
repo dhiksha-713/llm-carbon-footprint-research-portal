@@ -6,10 +6,9 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-from src.config import MANIFEST_PATH, RAW_DIR
+from src.config import MANIFEST_PATH, RAW_DIR, REQUEST_TIMEOUT, REQUEST_DELAY_S
 
 _ARXIV_PDF = "https://arxiv.org/pdf/{arxiv_id}.pdf"
-_REQUEST_DELAY_S = 2
 
 
 def _arxiv_id_from_url(url: str) -> str | None:
@@ -34,7 +33,7 @@ def _download(source_id: str, pdf_url: str, dest: Path) -> bool:
             pdf_url,
             headers={"User-Agent": "Mozilla/5.0 (research project)"},
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
             data = resp.read()
         dest.write_bytes(data)
         print(f"  [OK]   {source_id} -> {dest.name} ({len(data)/1024:.0f} KB)")
@@ -62,7 +61,7 @@ def main() -> None:
             ok.append(sid)
         else:
             fail.append(sid)
-        time.sleep(_REQUEST_DELAY_S)
+        time.sleep(REQUEST_DELAY_S)
 
     print(f"\nDone: {len(ok)} downloaded, {len(manual)} manual, {len(fail)} failed")
     if fail:

@@ -39,7 +39,8 @@ How do we accurately measure and compare the carbon footprint of different LLMs 
 │   │   ├── evaluation.py              # 20-query eval set + LLM-as-judge
 │   │   └── generate_report.py         # Markdown report generator
 │   └── app/
-│       └── app.py                     # FastAPI backend
+│       ├── app.py                     # FastAPI backend
+│       └── streamlit_ui.py            # Streamlit interactive UI
 ├── outputs/
 ├── logs/
 └── report/
@@ -75,9 +76,25 @@ python -m src.eval.generate_report
 # 8. Launch FastAPI server
 make serve
 # or: uvicorn src.app.app:app --host 0.0.0.0 --port 8000 --reload
+
+# 9. Launch Streamlit UI
+make ui
+# or: streamlit run src/app/streamlit_ui.py --server.port 8502
 ```
 
-Or: `make all` then `make serve`
+Or: `make all` then `make ui`
+
+### Streamlit UI
+
+The Streamlit interface at `http://localhost:8502` provides:
+
+| Page | Description |
+|------|-------------|
+| **Home** | Project overview, research question, Phase 2 deliverables, pipeline architecture, evaluation metrics |
+| **RAG Query** | Interactive query interface with baseline/enhanced mode, retrieved chunks, citation validation |
+| **Corpus Explorer** | Browse all 15 sources with filters (type, year, search), metadata, year distribution chart |
+| **Evaluation Dashboard** | Per-query scores, radar charts, baseline vs. enhanced comparison, breakdown by query type |
+| **Run Logs** | Full audit trail of every RAG query with expandable detail view |
 
 ### API Endpoints
 
@@ -100,13 +117,31 @@ All parameters are env-driven via `.env` (see `.env.example`):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GEMINI_API_KEY` | (required) | Google Gemini API key |
-| `GENERATION_MODEL` | gemini-2.0-flash | Model for answer generation |
-| `JUDGE_MODEL` | gemini-2.0-flash | Model for LLM-as-judge evaluation |
+| `GENERATION_MODEL` | gemini-3-flash-preview | Model for answer generation |
+| `JUDGE_MODEL` | gemini-3-flash-preview | Model for LLM-as-judge evaluation |
+| `GENERATION_TEMPERATURE` | 0.2 | Generation sampling temperature |
+| `JUDGE_TEMPERATURE` | 0.0 | Judge sampling temperature |
+| `MAX_OUTPUT_TOKENS` | 2048 | Max tokens for generation |
+| `JUDGE_MAX_TOKENS` | 300 | Max tokens for judge responses |
+| `DECOMPOSE_TEMPERATURE` | 0.0 | Temperature for query decomposition |
+| `REWRITE_TEMPERATURE` | 0.0 | Temperature for query rewriting |
+| `DECOMPOSE_MAX_TOKENS` | 300 | Max tokens for decomposition |
+| `REWRITE_MAX_TOKENS` | 100 | Max tokens for rewriting |
 | `EMBED_MODEL_NAME` | all-MiniLM-L6-v2 | Sentence-transformer model |
+| `EMBED_BATCH_SIZE` | 32 | Embedding batch size |
 | `CHUNK_SIZE_TOKENS` | 500 | Chunk size in tokens |
 | `CHUNK_OVERLAP_TOKENS` | 100 | Overlap between chunks |
 | `TOP_K` | 5 | Baseline retrieval count |
 | `ENHANCED_TOP_N` | 8 | Enhanced mode merged chunk count |
+| `MAX_SUB_QUERIES` | 4 | Max sub-queries for decomposition |
+| `REQUEST_TIMEOUT` | 30 | PDF download timeout (seconds) |
+| `REQUEST_DELAY_S` | 2 | Delay between downloads (seconds) |
+| `API_HOST` | 0.0.0.0 | FastAPI bind host |
+| `API_PORT` | 8000 | FastAPI bind port |
+| `STREAMLIT_PORT` | 8501 | Streamlit UI port |
+| `CHUNK_PREVIEW_LEN` | 200 | Chunk text preview length |
+| `SCORE_PASS_THRESHOLD` | 3.5 | Score threshold for "pass" label |
+| `SCORE_WARN_THRESHOLD` | 2.5 | Score threshold for "warn" label |
 
 ## Phase 1 Summary
 

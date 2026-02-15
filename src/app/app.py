@@ -15,7 +15,7 @@ from google import genai
 from src.config import (
     GENERATION_MODEL, EMBED_MODEL_NAME,
     PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, DATA_DIR, MANIFEST_PATH,
-    TOP_K, ENHANCED_TOP_N,
+    TOP_K, ENHANCED_TOP_N, API_HOST, API_PORT,
 )
 from src.rag.rag import load_index, run_rag, _get_client
 from src.rag.enhance_query_rewriting import run_enhanced_rag
@@ -270,4 +270,4 @@ def get_log_detail(run_id: str):
 # ── Entry point ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.app.app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("src.app.app:app", host=API_HOST, port=API_PORT, reload=True)

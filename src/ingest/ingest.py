@@ -12,7 +12,8 @@ from sentence_transformers import SentenceTransformer
 
 from src.config import (
     MANIFEST_PATH, RAW_DIR, PROCESSED_DIR, PROJECT_ROOT,
-    CHUNK_SIZE_TOKENS, CHUNK_OVERLAP_TOKENS, WORDS_PER_TOKEN, EMBED_MODEL_NAME,
+    CHUNK_SIZE_TOKENS, CHUNK_OVERLAP_TOKENS, WORDS_PER_TOKEN,
+    EMBED_MODEL_NAME, EMBED_BATCH_SIZE,
 )
 
 _SECTION_RE = re.compile(
@@ -117,7 +118,7 @@ def ingest_source(row: dict, model: SentenceTransformer) -> list[dict]:
     if records:
         embs = model.encode(
             [r["chunk_text"] for r in records],
-            show_progress_bar=False, batch_size=32,
+            show_progress_bar=False, batch_size=EMBED_BATCH_SIZE,
         )
         for r, e in zip(records, embs):
             r["embedding"] = e.tolist()

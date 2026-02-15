@@ -12,7 +12,8 @@ from google.genai import types
 
 from src.config import (
     OUTPUTS_DIR, JUDGE_MODEL, JUDGE_TEMPERATURE,
-    EMBED_MODEL_NAME, TOP_K,
+    EMBED_MODEL_NAME, TOP_K, JUDGE_MAX_TOKENS, CHUNK_PREVIEW_LEN,
+    MAX_OUTPUT_TOKENS,
 )
 
 # ── 20-Query Evaluation Set ─────────────────────────────────────────────
@@ -81,7 +82,7 @@ EVAL_QUERIES = [
 
 
 # ── LLM-as-Judge Scoring ────────────────────────────────────────────────
-def _judge(client: genai.Client, prompt: str, max_tokens: int = 300) -> dict:
+def _judge(client: genai.Client, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -> dict:
     """Call the judge model and parse JSON response."""
     resp = client.models.generate_content(
         model=JUDGE_MODEL,
@@ -101,8 +102,8 @@ def _judge(client: genai.Client, prompt: str, max_tokens: int = 300) -> dict:
 def score_groundedness(answer: str, chunks: list[dict], client: genai.Client) -> dict:
     ctx = "\n".join(
         f"[{c['source_id']}, {c['chunk_id']}]: "
-        f"{c.get('chunk_text_preview', c.get('chunk_text', ''))[:200]}"
-        for c in chunks[:6]
+        f"{c.get('chunk_text_preview', c.get('chunk_text', ''))[:CHUNK_PREVIEW_LEN]}"
+        for c in chunks[:TOP_K + 1]
     )
     prompt = (
         "Evaluate groundedness of this research answer.\n\n"
@@ -111,7 +112,7 @@ def score_groundedness(answer: str, chunks: list[dict], client: genai.Client) ->
         "3 = Most supported, minor gap\n"
         "2 = Several claims lack grounding\n"
         "1 = Major fabrication\n\n"
-        f"CONTEXT:\n{ctx}\n\nANSWER:\n{answer[:1500]}\n\n"
+        f"CONTEXT:\n{ctx}\n\nANSWER:\n{answer[:MAX_OUTPUT_TOKENS]}\n\n"
         'Output ONLY JSON: {"score": <1-4>, "reasoning": "<1-2 sentences>", "unsupported_claims": [...]}'
     )
     result = _judge(client, prompt)
@@ -122,30 +123,30 @@ def score_groundedness(answer: str, chunks: list[dict], client: genai.Client) ->
 def score_answer_relevance(query: str, answer: str, client: genai.Client) -> dict:
     prompt = (
         "Does this answer address the research question?\n\n"
-        f"QUESTION: {query}\nANSWER: {answer[:1000]}\n\n"
+        f"QUESTION: {query}\nANSWER: {answer[:MAX_OUTPUT_TOKENS]}\n\n"
         "Score 1-4:\n4 = Directly and completely addresses it\n"
         "3 = Mostly addresses, minor gap\n2 = Partially addresses\n"
         "1 = Does not address\n\n"
         'Output ONLY JSON: {"score": <1-4>, "reasoning": "<1 sentence>"}'
     )
-    return _judge(client, prompt, max_tokens=150)
+    return _judge(client, prompt)
 
 
 def score_context_precision(answer: str, chunks: list[dict], client: genai.Client) -> dict:
     """Judge whether the retrieved chunks are relevant to the answer produced."""
     ctx = "\n".join(
         f"[{c['source_id']}, {c['chunk_id']}]: "
-        f"{c.get('chunk_text_preview', c.get('chunk_text', ''))[:150]}"
-        for c in chunks[:6]
+        f"{c.get('chunk_text_preview', c.get('chunk_text', ''))[:CHUNK_PREVIEW_LEN]}"
+        for c in chunks[:TOP_K + 1]
     )
     prompt = (
         "How many of the retrieved chunks were actually useful for the answer?\n\n"
-        f"RETRIEVED CHUNKS:\n{ctx}\n\nANSWER:\n{answer[:800]}\n\n"
+        f"RETRIEVED CHUNKS:\n{ctx}\n\nANSWER:\n{answer[:MAX_OUTPUT_TOKENS]}\n\n"
         "Score 1-4:\n4 = All chunks relevant\n3 = Most relevant\n"
         "2 = Half irrelevant\n1 = Mostly irrelevant\n\n"
         'Output ONLY JSON: {"score": <1-4>, "reasoning": "<1 sentence>"}'
     )
-    return _judge(client, prompt, max_tokens=150)
+    return _judge(client, prompt)
 
 
 def compute_source_recall(retrieved_sources: list[str], expected_sources: list[str]) -> float | None:
@@ -208,7 +209,7 @@ def run_evaluation(mode: str = "baseline") -> list[dict]:
             "citations_total": cv.get("total_citations"),
             "citations_valid": cv.get("valid_citations"),
             "source_recall": src_recall,
-            "answer_preview": run_result["answer"][:300],
+            "answer_preview": run_result["answer"][:CHUNK_PREVIEW_LEN * 2],
             "retrieved_sources": ret_sources,
             "expected_sources": q["expected_sources"],
         }

@@ -15,7 +15,7 @@ from google.genai import types
 from src.config import (
     PROCESSED_DIR, LOGS_DIR, TOP_K, EMBED_MODEL_NAME,
     GENERATION_MODEL, GENERATION_TEMPERATURE,
-    MAX_OUTPUT_TOKENS, BASELINE_PROMPT_VERSION,
+    MAX_OUTPUT_TOKENS, BASELINE_PROMPT_VERSION, CHUNK_PREVIEW_LEN,
 )
 
 SYSTEM_PROMPT = (
@@ -162,7 +162,7 @@ def run_rag(
                 "year": c["year"],
                 "section_header": c["section_header"],
                 "retrieval_score": c["retrieval_score"],
-                "chunk_text_preview": c["chunk_text"][:200],
+                "chunk_text_preview": c["chunk_text"][:CHUNK_PREVIEW_LEN],
             }
             for c in chunks
         ],

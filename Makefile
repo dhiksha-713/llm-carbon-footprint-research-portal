@@ -1,7 +1,15 @@
-.PHONY: install download ingest query eval-baseline eval-enhanced eval-both report serve clean all help
+.PHONY: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean all help
+
+# Load .env if present (host/port/etc. driven from there)
+-include .env
+export
+
+API_HOST ?= 0.0.0.0
+API_PORT ?= 8000
+STREAMLIT_PORT ?= 8501
 
 help:
-	@echo "Targets: install download ingest query eval-baseline eval-enhanced eval-both report serve clean all"
+	@echo "Targets: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean all"
 
 install:
 	pip install -r requirements.txt
@@ -28,7 +36,10 @@ report:
 	python -m src.eval.generate_report
 
 serve:
-	uvicorn src.app.app:app --host 0.0.0.0 --port 8000 --reload
+	uvicorn src.app.app:app --host $(API_HOST) --port $(API_PORT) --reload
+
+ui:
+	streamlit run src/app/streamlit_ui.py --server.port $(STREAMLIT_PORT)
 
 all: install download ingest eval-both report
 	@echo "Done. See report/phase2/evaluation_report.md"

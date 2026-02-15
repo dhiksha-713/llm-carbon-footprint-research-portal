@@ -12,7 +12,9 @@ from google.genai import types
 from src.config import (
     GENERATION_MODEL, GENERATION_TEMPERATURE,
     MAX_OUTPUT_TOKENS, TOP_K, ENHANCED_TOP_N, ENHANCED_PROMPT_VERSION,
-    EMBED_MODEL_NAME,
+    EMBED_MODEL_NAME, DECOMPOSE_TEMPERATURE, DECOMPOSE_MAX_TOKENS,
+    REWRITE_TEMPERATURE, REWRITE_MAX_TOKENS, MAX_SUB_QUERIES,
+    CHUNK_PREVIEW_LEN,
 )
 from src.rag.rag import retrieve, validate_citations, save_log, load_index, _get_client, print_result
 
@@ -66,8 +68,8 @@ def decompose_query(query: str, client: genai.Client) -> list[str]:
         contents=f"Decompose this research query:\n\n{query}",
         config=types.GenerateContentConfig(
             system_instruction=_DECOMPOSE_INSTRUCTION,
-            temperature=0.0,
-            max_output_tokens=300,
+            temperature=DECOMPOSE_TEMPERATURE,
+            max_output_tokens=DECOMPOSE_MAX_TOKENS,
         ),
     )
     text = (resp.text or "").strip()
@@ -77,7 +79,7 @@ def decompose_query(query: str, client: genai.Client) -> list[str]:
             return [str(q) for q in parsed]
     except json.JSONDecodeError:
         lines = [ln.strip().strip('"\'- ') for ln in text.split("\n") if ln.strip()]
-        return [ln for ln in lines if len(ln) > 10][:4]
+        return [ln for ln in lines if len(ln) > 10][:MAX_SUB_QUERIES]
     return [query]
 
 
@@ -87,8 +89,8 @@ def rewrite_query(query: str, client: genai.Client) -> str:
         contents=query,
         config=types.GenerateContentConfig(
             system_instruction=_REWRITE_INSTRUCTION,
-            temperature=0.0,
-            max_output_tokens=100,
+            temperature=REWRITE_TEMPERATURE,
+            max_output_tokens=REWRITE_MAX_TOKENS,
         ),
     )
     return (resp.text or query).strip()
@@ -180,7 +182,7 @@ def run_enhanced_rag(
                 "year": c["year"],
                 "section_header": c["section_header"],
                 "retrieval_score": c["retrieval_score"],
-                "chunk_text_preview": c["chunk_text"][:200],
+                "chunk_text_preview": c["chunk_text"][:CHUNK_PREVIEW_LEN],
             }
             for c in merged
         ],

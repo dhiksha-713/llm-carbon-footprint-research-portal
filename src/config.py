@@ -1,4 +1,4 @@
-"""Centralized configuration. All tunable parameters and paths live here."""
+"""Centralized configuration. Every tunable parameter lives here, driven by .env."""
 
 import os
 from pathlib import Path
@@ -26,9 +26,15 @@ JUDGE_MODEL = os.getenv("JUDGE_MODEL", "gemini-3-flash-preview")
 GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.2"))
 JUDGE_TEMPERATURE = float(os.getenv("JUDGE_TEMPERATURE", "0.0"))
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
+JUDGE_MAX_TOKENS = int(os.getenv("JUDGE_MAX_TOKENS", "300"))
+DECOMPOSE_MAX_TOKENS = int(os.getenv("DECOMPOSE_MAX_TOKENS", "300"))
+REWRITE_MAX_TOKENS = int(os.getenv("REWRITE_MAX_TOKENS", "100"))
+DECOMPOSE_TEMPERATURE = float(os.getenv("DECOMPOSE_TEMPERATURE", "0.0"))
+REWRITE_TEMPERATURE = float(os.getenv("REWRITE_TEMPERATURE", "0.0"))
 
 # ── Embeddings ───────────────────────────────────────────────────────────
 EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "all-MiniLM-L6-v2")
+EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
 
 # ── Chunking ─────────────────────────────────────────────────────────────
 CHUNK_SIZE_TOKENS = int(os.getenv("CHUNK_SIZE_TOKENS", "500"))
@@ -38,7 +44,22 @@ WORDS_PER_TOKEN = float(os.getenv("WORDS_PER_TOKEN", "0.75"))
 # ── Retrieval ────────────────────────────────────────────────────────────
 TOP_K = int(os.getenv("TOP_K", "5"))
 ENHANCED_TOP_N = int(os.getenv("ENHANCED_TOP_N", "8"))
+MAX_SUB_QUERIES = int(os.getenv("MAX_SUB_QUERIES", "4"))
+
+# ── Download ─────────────────────────────────────────────────────────────
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
+REQUEST_DELAY_S = int(os.getenv("REQUEST_DELAY_S", "2"))
+
+# ── Serving ──────────────────────────────────────────────────────────────
+API_HOST = os.getenv("API_HOST", "0.0.0.0")
+API_PORT = int(os.getenv("API_PORT", "8000"))
+STREAMLIT_PORT = int(os.getenv("STREAMLIT_PORT", "8501"))
+
+# ── Evaluation ───────────────────────────────────────────────────────────
+CHUNK_PREVIEW_LEN = int(os.getenv("CHUNK_PREVIEW_LEN", "200"))
+SCORE_PASS_THRESHOLD = float(os.getenv("SCORE_PASS_THRESHOLD", "3.5"))
+SCORE_WARN_THRESHOLD = float(os.getenv("SCORE_WARN_THRESHOLD", "2.5"))
 
 # ── Prompt Versions ──────────────────────────────────────────────────────
-BASELINE_PROMPT_VERSION = "RAG-BASELINE-V2"
-ENHANCED_PROMPT_VERSION = "RAG-ENHANCED-REWRITE-V2"
+BASELINE_PROMPT_VERSION = os.getenv("BASELINE_PROMPT_VERSION", "RAG-BASELINE-V2")
+ENHANCED_PROMPT_VERSION = os.getenv("ENHANCED_PROMPT_VERSION", "RAG-ENHANCED-REWRITE-V2")

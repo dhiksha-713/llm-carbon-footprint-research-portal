@@ -5,7 +5,11 @@ import glob
 import datetime
 from pathlib import Path
 
-from src.config import OUTPUTS_DIR, REPORT_DIR
+from src.config import (
+    OUTPUTS_DIR, REPORT_DIR, SCORE_PASS_THRESHOLD, SCORE_WARN_THRESHOLD,
+    GENERATION_MODEL, EMBED_MODEL_NAME, CHUNK_SIZE_TOKENS,
+    CHUNK_OVERLAP_TOKENS, TOP_K, ENHANCED_TOP_N,
+)
 
 
 def _load_latest(mode: str) -> list[dict]:
@@ -23,7 +27,7 @@ def _avg(vals):
 def _label(s):
     if s is None:
         return "---"
-    return f"{s:.2f}" + (" pass" if s >= 3.5 else " warn" if s >= 2.5 else " fail")
+    return f"{s:.2f}" + (" pass" if s >= SCORE_PASS_THRESHOLD else " warn" if s >= SCORE_WARN_THRESHOLD else " fail")
 
 
 def _results_table(results: list[dict], title: str) -> list[str]:
@@ -69,12 +73,12 @@ def generate_report() -> Path:
         f"**Generated**: {ts}", "", "---", "",
         "## 1. System Overview", "",
         "- **Corpus**: 15 sources (8 peer-reviewed, 4 technical reports, 2 tools, 1 standards)",
-        "- **Chunking**: Section-aware, 500 tokens, 100-token overlap",
-        "- **Embeddings**: all-MiniLM-L6-v2 (384-dim)",
+        f"- **Chunking**: Section-aware, {CHUNK_SIZE_TOKENS} tokens, {CHUNK_OVERLAP_TOKENS}-token overlap",
+        f"- **Embeddings**: {EMBED_MODEL_NAME}",
         "- **Index**: FAISS IndexFlatIP (cosine similarity)",
-        "- **Generation**: Gemini 2.0 Flash via google-genai SDK",
-        "- **Baseline**: top-5 semantic retrieval",
-        "- **Enhanced**: query rewriting + decomposition -> top-8 merged chunks", "", "---", "",
+        f"- **Generation**: {GENERATION_MODEL} via google-genai SDK",
+        f"- **Baseline**: top-{TOP_K} semantic retrieval",
+        f"- **Enhanced**: query rewriting + decomposition -> top-{ENHANCED_TOP_N} merged chunks", "", "---", "",
         "## 2. Query Set Design", "",
         "| Category | Count | Rationale |",
         "|----------|-------|-----------|",
