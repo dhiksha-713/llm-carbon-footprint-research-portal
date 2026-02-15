@@ -45,11 +45,21 @@ EVAL_QUERIES: list[dict] = [
 
 def _judge(client: LLMClient, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -> dict:
     resp = client.generate(prompt, temperature=JUDGE_TEMPERATURE, max_tokens=max_tokens)
-    text = re.sub(r"```json|```", "", resp.text).strip()
+    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip()
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
-        return {"score": None, "reasoning": "JSON parse error"}
+        pass
+    m = re.search(r"\{[^{}]*\"score\"\s*:\s*\d[^{}]*\}", text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except (json.JSONDecodeError, TypeError):
+            pass
+    m = re.search(r"\"score\"\s*:\s*(\d+)", text)
+    if m:
+        return {"score": int(m.group(1)), "reasoning": "Extracted from non-JSON response"}
+    return {"score": None, "reasoning": "JSON parse error"}
 
 
 def score_groundedness(answer: str, chunks: list[dict], client: LLMClient) -> dict:

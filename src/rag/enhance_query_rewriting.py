@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 
 from sentence_transformers import SentenceTransformer
 
@@ -65,15 +66,18 @@ def decompose_query(query: str, client: LLMClient) -> list[str]:
         system=_DECOMPOSE_INSTRUCTION,
         temperature=DECOMPOSE_TEMPERATURE, max_tokens=DECOMPOSE_MAX_TOKENS,
     )
-    text = resp.text.strip()
+    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip()
     try:
         parsed = json.loads(text)
         if isinstance(parsed, list):
-            return [str(q) for q in parsed][:MAX_SUB_QUERIES]
-    except json.JSONDecodeError:
-        lines = [ln.strip().strip('"\'- ') for ln in text.split("\n") if ln.strip()]
-        return [ln for ln in lines if len(ln) > 10][:MAX_SUB_QUERIES]
-    return [query]
+            subs = [str(q).strip() for q in parsed if str(q).strip()][:MAX_SUB_QUERIES]
+            if subs:
+                return subs
+    except (json.JSONDecodeError, TypeError):
+        pass
+    lines = [ln.strip().strip('"\'- ').rstrip(",") for ln in text.split("\n") if ln.strip()]
+    subs = [ln for ln in lines if len(ln) > 10][:MAX_SUB_QUERIES]
+    return subs if subs else [query]
 
 
 def rewrite_query(query: str, client: LLMClient) -> str:
@@ -110,6 +114,8 @@ def run_enhanced_rag(
     sub_queries = (
         decompose_query(query, client) if qtype in ("synthesis", "multihop") else [rewritten]
     )
+    if not sub_queries:
+        sub_queries = [query]
 
     merged = _merge_chunks([retrieve(sq, index, store, embed_model, TOP_K) for sq in sub_queries])
 
