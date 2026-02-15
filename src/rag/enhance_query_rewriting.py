@@ -1,24 +1,24 @@
 """Enhanced RAG: query rewriting, decomposition, multi-sub-query retrieval, synthesis."""
 
-import json
-import re
+from __future__ import annotations
+
 import datetime
-from pathlib import Path
+import json
+import logging
+import re
 
 from sentence_transformers import SentenceTransformer
-from google import genai
-from google.genai import types
+
+log = logging.getLogger(__name__)
 
 from src.config import (
-    GENERATION_MODEL, GENERATION_TEMPERATURE,
-    MAX_OUTPUT_TOKENS, TOP_K, ENHANCED_TOP_N, ENHANCED_PROMPT_VERSION,
-    EMBED_MODEL_NAME, DECOMPOSE_TEMPERATURE, DECOMPOSE_MAX_TOKENS,
+    TOP_K, ENHANCED_TOP_N, ENHANCED_PROMPT_VERSION, EMBED_MODEL_NAME,
+    DECOMPOSE_TEMPERATURE, DECOMPOSE_MAX_TOKENS,
     REWRITE_TEMPERATURE, REWRITE_MAX_TOKENS, MAX_SUB_QUERIES,
-    CHUNK_PREVIEW_LEN,
 )
-from src.rag.rag import retrieve, validate_citations, save_log, load_index, _get_client, print_result
-
-_CITE_RE = re.compile(r"\((\w+\d{4}(?:_\w+)?),\s*(chunk_\d+)\)")
+from src.llm_client import LLMClient, get_llm_client
+from src.rag.rag import retrieve, validate_citations, save_log, load_index, print_result
+from src.utils import sanitize_query, CITE_RE, build_chunk_context, summarize_chunk
 
 _DECOMPOSE_INSTRUCTION = (
     "You decompose complex research questions into 2-4 focused sub-queries. "
@@ -33,22 +33,24 @@ _REWRITE_INSTRUCTION = (
 )
 
 _SYNTHESIS_INSTRUCTION = (
-    "You synthesize evidence from multiple retrieved passages.\n\n"
+    "You are a research synthesis assistant. You MUST use the provided CONTEXT CHUNKS "
+    "to answer the query. The chunks contain real academic text - read them carefully.\n\n"
     "RULES:\n"
-    "1. Use ONLY the provided context chunks.\n"
-    "2. Every claim MUST have an inline citation: (source_id, chunk_id).\n"
-    "3. If context lacks evidence, state: 'The corpus does not contain evidence for this claim.'\n"
-    "4. When sources agree, note agreement and cite both.\n"
-    "5. When sources disagree, flag: '[CONFLICT: source A says X; source B says Y]'\n"
-    "6. Preserve hedging language.\n"
-    "7. End with a REFERENCE LIST."
+    "1. Read ALL provided context chunks thoroughly before answering.\n"
+    "2. Use ONLY information from the provided context chunks.\n"
+    "3. Every factual claim MUST have an inline citation: (source_id, chunk_id).\n"
+    "4. Only say 'The corpus does not contain evidence' if the chunks truly have NO relevant information.\n"
+    "5. When sources agree, note agreement and cite both.\n"
+    "6. When sources disagree, flag: '[CONFLICT: source A says X; source B says Y]'\n"
+    "7. Preserve hedging language (approximately, estimated, may).\n"
+    "8. End with a REFERENCE LIST of all cited sources."
 )
 
 _SYNTHESIS_KW = {"compare", "contrast", "difference", "agree", "disagree",
                  "both", "across", "versus", "vs", "relationship"}
-_MULTIHOP_KW = {"why", "what causes", "what leads", "how does", "explain",
-                "what factors", "what determines"}
-_EDGE_KW = {"does the corpus", "is there evidence", "are there", "does any"}
+_MULTIHOP_KW  = {"why", "what causes", "what leads", "how does", "explain",
+                 "what factors", "what determines"}
+_EDGE_KW      = {"does the corpus", "is there evidence", "are there", "does any"}
 
 
 def classify_query(query: str) -> str:
@@ -62,48 +64,46 @@ def classify_query(query: str) -> str:
     return "direct"
 
 
-def decompose_query(query: str, client: genai.Client) -> list[str]:
-    resp = client.models.generate_content(
-        model=GENERATION_MODEL,
-        contents=f"Decompose this research query:\n\n{query}",
-        config=types.GenerateContentConfig(
-            system_instruction=_DECOMPOSE_INSTRUCTION,
-            temperature=DECOMPOSE_TEMPERATURE,
-            max_output_tokens=DECOMPOSE_MAX_TOKENS,
-        ),
+def decompose_query(query: str, client: LLMClient) -> list[str]:
+    log.info("decompose_query: '%s'", query[:80])
+    resp = client.generate(
+        f"Decompose this research query:\n\n{query}",
+        system=_DECOMPOSE_INSTRUCTION,
+        temperature=DECOMPOSE_TEMPERATURE, max_tokens=DECOMPOSE_MAX_TOKENS,
     )
-    text = (resp.text or "").strip()
+    log.debug("decompose raw response: %s", resp.text[:300])
+    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip()
     try:
         parsed = json.loads(text)
         if isinstance(parsed, list):
-            return [str(q) for q in parsed]
-    except json.JSONDecodeError:
-        lines = [ln.strip().strip('"\'- ') for ln in text.split("\n") if ln.strip()]
-        return [ln for ln in lines if len(ln) > 10][:MAX_SUB_QUERIES]
-    return [query]
+            subs = [str(q).strip() for q in parsed if str(q).strip()][:MAX_SUB_QUERIES]
+            if subs:
+                log.info("decompose -> %d sub-queries (JSON parse)", len(subs))
+                return subs
+    except (json.JSONDecodeError, TypeError):
+        pass
+    lines = [ln.strip().strip('"\'- ').rstrip(",") for ln in text.split("\n") if ln.strip()]
+    subs = [ln for ln in lines if len(ln) > 10][:MAX_SUB_QUERIES]
+    result = subs if subs else [query]
+    log.info("decompose -> %d sub-queries (line fallback)", len(result))
+    return result
 
 
-def rewrite_query(query: str, client: genai.Client) -> str:
-    resp = client.models.generate_content(
-        model=GENERATION_MODEL,
-        contents=query,
-        config=types.GenerateContentConfig(
-            system_instruction=_REWRITE_INSTRUCTION,
-            temperature=REWRITE_TEMPERATURE,
-            max_output_tokens=REWRITE_MAX_TOKENS,
-        ),
+def rewrite_query(query: str, client: LLMClient) -> str:
+    resp = client.generate(
+        query, system=_REWRITE_INSTRUCTION,
+        temperature=REWRITE_TEMPERATURE, max_tokens=REWRITE_MAX_TOKENS,
     )
-    return (resp.text or query).strip()
+    rewritten = resp.text.strip() or query
+    log.info("rewrite_query: '%s' -> '%s'", query[:60], rewritten[:60])
+    return rewritten
 
 
 def _merge_chunks(chunk_lists: list[list[dict]], top_n: int = ENHANCED_TOP_N) -> list[dict]:
-    seen, merged = set(), []
-    pool = sorted(
-        [c for cl in chunk_lists for c in cl],
-        key=lambda c: c["retrieval_score"],
-        reverse=True,
-    )
-    for c in pool:
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict] = []
+    for c in sorted((c for cl in chunk_lists for c in cl),
+                    key=lambda c: c["retrieval_score"], reverse=True):
         key = (c["source_id"], c["chunk_id"])
         if key not in seen:
             seen.add(key)
@@ -113,56 +113,44 @@ def _merge_chunks(chunk_lists: list[list[dict]], top_n: int = ENHANCED_TOP_N) ->
     return merged
 
 
-def _build_synthesis_prompt(query: str, chunks: list[dict],
-                            sub_queries: list[str], rewritten: str) -> str:
-    blocks = []
-    for i, c in enumerate(chunks):
-        blocks.append(
-            f"--- CHUNK {i+1} ---\n"
-            f"source_id: {c['source_id']}\nchunk_id: {c['chunk_id']}\n"
-            f"title: {c['title']}\nauthors: {c['authors']} ({c['year']})\n"
-            f"section: {c['section_header']}\nscore: {c['retrieval_score']:.4f}\n\n"
-            f"{c['chunk_text']}"
-        )
-    subs = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(sub_queries))
-    return (
-        f"ORIGINAL QUERY: {query}\nREWRITTEN: {rewritten}\n"
-        f"SUB-QUERIES:\n{subs}\n\nCONTEXT ({len(chunks)} chunks):\n"
-        + "\n\n".join(blocks) +
-        "\n\n---\nSynthesize the chunks to answer the original query. "
-        "Cite every claim. Flag conflicts. End with REFERENCE LIST."
-    )
-
-
 def run_enhanced_rag(
-    query: str,
-    index,
-    store: list[dict],
-    embed_model: SentenceTransformer,
-    client: genai.Client,
+    query: str, index, store: list[dict],
+    embed_model: SentenceTransformer, client: LLMClient,
 ) -> dict:
+    query = sanitize_query(query)
+    log.info("run_enhanced_rag query='%s'", query[:80])
     ts = datetime.datetime.utcnow().isoformat() + "Z"
     qtype = classify_query(query)
+    log.info("classify_query -> %s", qtype)
 
     rewritten = rewrite_query(query, client)
-    sub_queries = decompose_query(query, client) if qtype in ("synthesis", "multihop") else [rewritten]
-
-    chunk_lists = [retrieve(sq, index, store, embed_model, TOP_K) for sq in sub_queries]
-    merged = _merge_chunks(chunk_lists)
-
-    resp = client.models.generate_content(
-        model=GENERATION_MODEL,
-        contents=_build_synthesis_prompt(query, merged, sub_queries, rewritten),
-        config=types.GenerateContentConfig(
-            system_instruction=_SYNTHESIS_INSTRUCTION,
-            temperature=GENERATION_TEMPERATURE,
-            max_output_tokens=MAX_OUTPUT_TOKENS,
-        ),
+    sub_queries = (
+        decompose_query(query, client) if qtype in ("synthesis", "multihop") else [rewritten]
     )
-    text = resp.text or ""
-    cites = [{"source_id": s, "chunk_id": c} for s, c in _CITE_RE.findall(text)]
+    if not sub_queries:
+        log.warning("decompose returned empty list, falling back to original query")
+        sub_queries = [query]
+    log.info("sub_queries=%d: %s", len(sub_queries), [q[:50] for q in sub_queries])
+
+    merged = _merge_chunks([retrieve(sq, index, store, embed_model, TOP_K) for sq in sub_queries])
+    log.info("merged chunks: %d from %d sub-queries", len(merged), len(sub_queries))
+
+    subs = "\n".join(f"  {i + 1}. {q}" for i, q in enumerate(sub_queries))
+    prompt = (
+        f"ORIGINAL QUERY: {query}\n"
+        f"REWRITTEN QUERY: {rewritten}\n"
+        f"SUB-QUERIES:\n{subs}\n\n"
+        f"CONTEXT CHUNKS ({len(merged)} chunks from academic papers):\n"
+        f"{build_chunk_context(merged)}\n\n"
+        "---\n"
+        "TASK: Using the context chunks above, synthesize a comprehensive answer to the "
+        "original query. Cite every factual claim as (source_id, chunk_id). "
+        "If sources conflict, flag with [CONFLICT]. End with a REFERENCE LIST."
+    )
+    resp = client.generate(prompt, system=_SYNTHESIS_INSTRUCTION)
+
+    cites = [{"source_id": s, "chunk_id": c} for s, c in CITE_RE.findall(resp.text)]
     cv = validate_citations(cites, merged)
-    usage = resp.usage_metadata
 
     entry = {
         "run_id": f"{ts}_{hash(query) % 100000:05d}",
@@ -174,47 +162,39 @@ def run_enhanced_rag(
         "rewritten_query": rewritten,
         "sub_queries": sub_queries,
         "top_k": TOP_K,
-        "retrieved_chunks": [
-            {
-                "source_id": c["source_id"],
-                "chunk_id": c["chunk_id"],
-                "title": c["title"],
-                "year": c["year"],
-                "section_header": c["section_header"],
-                "retrieval_score": c["retrieval_score"],
-                "chunk_text_preview": c["chunk_text"][:CHUNK_PREVIEW_LEN],
-            }
-            for c in merged
-        ],
-        "answer": text,
+        "retrieved_chunks": [summarize_chunk(c) for c in merged],
+        "answer": resp.text,
         "citations_extracted": cites,
         "citation_validation": cv,
-        "tokens": {
-            "input": getattr(usage, "prompt_token_count", 0),
-            "output": getattr(usage, "candidates_token_count", 0),
-        },
+        "tokens": {"input": resp.input_tokens, "output": resp.output_tokens},
     }
-    save_log(entry)
+    entry["_log_path"] = save_log(entry)
     return entry
 
 
-if __name__ == "__main__":
+def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Enhanced RAG CLI")
     parser.add_argument("--query", type=str)
     parser.add_argument("--eval", action="store_true")
     args = parser.parse_args()
 
     index, store = load_index()
     embed_model = SentenceTransformer(EMBED_MODEL_NAME)
-    client = _get_client()
+    client = get_llm_client()
 
     if args.query:
-        print_result(run_enhanced_rag(args.query, index, store, embed_model, client))
+        result = run_enhanced_rag(args.query, index, store, embed_model, client)
+        print_result(result, log_path=result.get("_log_path"))
     elif args.eval:
         from src.eval.evaluation import EVAL_QUERIES
-        for q in [q for q in EVAL_QUERIES if q["type"] in ("synthesis", "multihop")]:
+        for q in (q for q in EVAL_QUERIES if q["type"] in ("synthesis", "multihop")):
             print(f"\n[{q['id']}] {q['query'][:70]}...")
-            print_result(run_enhanced_rag(q["query"], index, store, embed_model, client))
+            result = run_enhanced_rag(q["query"], index, store, embed_model, client)
+            print_result(result, log_path=result.get("_log_path"))
     else:
         parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
