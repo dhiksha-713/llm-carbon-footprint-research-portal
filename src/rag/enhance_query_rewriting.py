@@ -33,15 +33,17 @@ _REWRITE_INSTRUCTION = (
 )
 
 _SYNTHESIS_INSTRUCTION = (
-    "You synthesize evidence from multiple retrieved passages.\n\n"
+    "You are a research synthesis assistant. You MUST use the provided CONTEXT CHUNKS "
+    "to answer the query. The chunks contain real academic text - read them carefully.\n\n"
     "RULES:\n"
-    "1. Use ONLY the provided context chunks.\n"
-    "2. Every claim MUST have an inline citation: (source_id, chunk_id).\n"
-    "3. If context lacks evidence, state: 'The corpus does not contain evidence for this claim.'\n"
-    "4. When sources agree, note agreement and cite both.\n"
-    "5. When sources disagree, flag: '[CONFLICT: source A says X; source B says Y]'\n"
-    "6. Preserve hedging language.\n"
-    "7. End with a REFERENCE LIST."
+    "1. Read ALL provided context chunks thoroughly before answering.\n"
+    "2. Use ONLY information from the provided context chunks.\n"
+    "3. Every factual claim MUST have an inline citation: (source_id, chunk_id).\n"
+    "4. Only say 'The corpus does not contain evidence' if the chunks truly have NO relevant information.\n"
+    "5. When sources agree, note agreement and cite both.\n"
+    "6. When sources disagree, flag: '[CONFLICT: source A says X; source B says Y]'\n"
+    "7. Preserve hedging language (approximately, estimated, may).\n"
+    "8. End with a REFERENCE LIST of all cited sources."
 )
 
 _SYNTHESIS_KW = {"compare", "contrast", "difference", "agree", "disagree",
@@ -135,11 +137,15 @@ def run_enhanced_rag(
 
     subs = "\n".join(f"  {i + 1}. {q}" for i, q in enumerate(sub_queries))
     prompt = (
-        f"ORIGINAL QUERY: {query}\nREWRITTEN: {rewritten}\n"
-        f"SUB-QUERIES:\n{subs}\n\nCONTEXT ({len(merged)} chunks):\n"
-        f"{build_chunk_context(merged)}\n\n---\n"
-        "Synthesize the chunks to answer the original query. "
-        "Cite every claim. Flag conflicts. End with REFERENCE LIST."
+        f"ORIGINAL QUERY: {query}\n"
+        f"REWRITTEN QUERY: {rewritten}\n"
+        f"SUB-QUERIES:\n{subs}\n\n"
+        f"CONTEXT CHUNKS ({len(merged)} chunks from academic papers):\n"
+        f"{build_chunk_context(merged)}\n\n"
+        "---\n"
+        "TASK: Using the context chunks above, synthesize a comprehensive answer to the "
+        "original query. Cite every factual claim as (source_id, chunk_id). "
+        "If sources conflict, flag with [CONFLICT]. End with a REFERENCE LIST."
     )
     resp = client.generate(prompt, system=_SYNTHESIS_INSTRUCTION)
 

@@ -115,7 +115,7 @@ src/
   llm_client.py                # Provider-agnostic LLM abstraction
   utils.py                     # Sanitization, citation regex, chunk formatting, averages
   ingest/
-    download_sources.py        # Download PDFs from manifest URLs
+    download_sources.py        # Download + validate PDFs (checks title against first page)
     ingest.py                  # Parse PDFs -> section-aware chunking -> embed -> FAISS index
   rag/
     rag.py                     # Baseline RAG: retrieve, generate, validate citations, log
@@ -152,7 +152,8 @@ report/phase2/                 # Generated evaluation report (git-ignored)
 | `make serve` | Start FastAPI backend on port 8000 |
 | `make ui` | Start Streamlit UI on port 8501 |
 | `make all` | Full pipeline: install, download, ingest, eval-both, report |
-| `make clean` | Remove all generated artifacts (processed, logs, outputs) |
+| `make clean` | Remove generated artifacts (index, logs, outputs, report) |
+| `make clean-all` | Also remove downloaded PDFs - next run re-downloads everything |
 
 ---
 
@@ -207,7 +208,9 @@ All prompts are module-level constants. Each has a single responsibility and is 
 
 - **20 sources**: 14 peer-reviewed papers, 3 technical reports, 3 tool/workshop papers (listed in `data/data_manifest.csv`)
 - **PDFs are git-ignored**: Downloaded on first run via `make download` or automatically by the Demo page
+- **PDF validation**: After download, each PDF's first-page text is checked against the expected title from the manifest. Mismatched PDFs (wrong paper) are deleted and flagged
 - **Fresh ingestion**: `make ingest` clears `data/processed/` and rebuilds from scratch every time
+- **Chunk quality filter**: Chunks shorter than 50 characters are discarded during ingestion
 - **Chunking**: Section-aware sliding window, 500 tokens per chunk, 100-token overlap
 - **Embeddings**: `all-MiniLM-L6-v2` (384-dim), L2-normalized, stored in FAISS `IndexFlatIP` (cosine similarity)
 - **Logging**: Every RAG run appends a structured JSON entry to `logs/rag_runs.jsonl` with run_id, timestamp, query, retrieved chunks, answer, citations, and validation results

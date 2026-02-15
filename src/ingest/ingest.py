@@ -2,6 +2,7 @@
 
 import csv
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -15,6 +16,10 @@ from src.config import (
     CHUNK_SIZE_TOKENS, CHUNK_OVERLAP_TOKENS, WORDS_PER_TOKEN,
     EMBED_MODEL_NAME, EMBED_BATCH_SIZE,
 )
+
+log = logging.getLogger(__name__)
+
+MIN_CHUNK_CHARS = 50
 
 _SECTION_RE = re.compile(
     r"^(?:\d+\.?\s+|[A-Z][A-Z\s]{3,}$|Abstract|Introduction|"
@@ -40,8 +45,11 @@ def extract_text(pdf_path: Path) -> list[dict]:
             txt = re.sub(r"[ \t]+", " ", txt)
             pages.append({"page_num": i + 1, "text": txt.strip()})
         doc.close()
+        log.info("extract_text(%s) -> %d pages, %d total chars",
+                 pdf_path.name, len(pages), sum(len(p["text"]) for p in pages))
         return pages
     except Exception as exc:
+        log.error("PDF parse failed for %s: %s", pdf_path, exc)
         print(f"  [ERROR] PDF parse failed: {exc}")
         return []
 
@@ -69,12 +77,13 @@ def chunk_text(full_text: str) -> list[dict]:
         while start < len(words):
             end = min(start + chunk_words, len(words))
             text = " ".join(words[start:end])
-            chunks.append({
-                "chunk_text": text,
-                "section_header": header,
-                "char_start": offset,
-                "char_end": offset + len(text),
-            })
+            if len(text.strip()) >= MIN_CHUNK_CHARS:
+                chunks.append({
+                    "chunk_text": text,
+                    "section_header": header,
+                    "char_start": offset,
+                    "char_end": offset + len(text),
+                })
             offset += len(text) + 1
             if end >= len(words):
                 break
@@ -87,6 +96,7 @@ def ingest_source(row: dict, model: SentenceTransformer) -> list[dict]:
     """Parse, chunk, and embed a single source."""
     pdf_path = PROJECT_ROOT / row["raw_path"]
     if not pdf_path.exists():
+        log.warning("[SKIP] %s - PDF not found at %s", row["source_id"], pdf_path)
         print(f"  [SKIP] {row['source_id']} - PDF not found")
         return []
 
@@ -122,6 +132,8 @@ def ingest_source(row: dict, model: SentenceTransformer) -> list[dict]:
         )
         for r, e in zip(records, embs):
             r["embedding"] = e.tolist()
+        log.info("%s: %d chunks (min %d chars, %d pages)",
+                 row["source_id"], len(records), MIN_CHUNK_CHARS, len(pages))
         print(f"  {row['source_id']}: {len(records)} chunks")
     return records
 
@@ -138,9 +150,9 @@ def build_index(chunks: list[dict]) -> faiss.Index:
 
 def main() -> None:
     manifest = load_manifest()
-    print(f"Loaded {len(manifest)} sources | chunk={CHUNK_SIZE_TOKENS}t overlap={CHUNK_OVERLAP_TOKENS}t")
+    print(f"Loaded {len(manifest)} sources | chunk={CHUNK_SIZE_TOKENS}t overlap={CHUNK_OVERLAP_TOKENS}t | min_chars={MIN_CHUNK_CHARS}")
+    log.info("Ingestion starting: %d sources", len(manifest))
 
-    # Clear old processed data so every ingest run is fresh
     for old in PROCESSED_DIR.glob("*"):
         old.unlink()
         print(f"  [CLEAN] removed {old.name}")
@@ -151,7 +163,7 @@ def main() -> None:
         all_chunks.extend(ingest_source(row, model))
 
     if not all_chunks:
-        print("[ERROR] No chunks produced -- ensure PDFs exist in data/raw/")
+        print("[ERROR] No chunks produced - ensure PDFs exist in data/raw/")
         print("        Run: make download")
         return
 
@@ -167,20 +179,24 @@ def main() -> None:
     )
     faiss.write_index(index, str(PROCESSED_DIR / "faiss_index.bin"))
 
+    sources_ok = sorted(set(c["source_id"] for c in store))
     strategy = {
         "chunk_size_tokens": CHUNK_SIZE_TOKENS,
         "chunk_overlap_tokens": CHUNK_OVERLAP_TOKENS,
+        "min_chunk_chars": MIN_CHUNK_CHARS,
         "embed_model": EMBED_MODEL_NAME,
         "embed_dim": index.d,
         "section_aware": True,
         "total_chunks": len(store),
         "total_sources": len(manifest),
-        "sources_ingested": len({c["source_id"] for c in store}),
+        "sources_ingested": len(sources_ok),
+        "sources_list": sources_ok,
     }
     (PROCESSED_DIR / "chunking_strategy.json").write_text(
         json.dumps(strategy, indent=2), encoding="utf-8"
     )
-    print(f"\nIndexed {len(store)} chunks from {strategy['sources_ingested']} sources")
+    print(f"\nIndexed {len(store)} chunks from {strategy['sources_ingested']}/{len(manifest)} sources")
+    log.info("Ingestion complete: %d chunks, %d sources", len(store), len(sources_ok))
 
 
 if __name__ == "__main__":

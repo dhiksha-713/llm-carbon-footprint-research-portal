@@ -1,4 +1,4 @@
-.PHONY: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean all help
+.PHONY: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean clean-all all help
 
 # Load .env if present (host/port/etc. driven from there)
 -include .env
@@ -55,5 +55,9 @@ all: install download ingest eval-both report
 	@echo "Done. See report/phase2/evaluation_report.md"
 
 clean:
-	rm -rf data/processed/ logs/ outputs/
-	@echo "Cleaned generated artifacts"
+	rm -rf data/processed/ logs/ outputs/ report/phase2/
+	@echo "Cleaned generated artifacts (index, logs, outputs, report)"
+
+clean-all: clean
+	rm -rf data/raw/*.pdf
+	@echo "Also removed downloaded PDFs - next run will re-download everything"
