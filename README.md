@@ -7,6 +7,40 @@ Supports **multi-provider LLM comparison** (Google Gemini and Azure OpenAI o4-mi
 
 ---
 
+## What is this?
+
+This is a **research assistant** that reads 20 peer-reviewed academic papers about the environmental
+impact of AI models and answers your questions using only those sources. Think of it like a smart
+librarian that quotes every source and never makes things up.
+
+### What is Phase 2?
+
+| Phase | What we did |
+|---|---|
+| **Phase 1** (completed) | Designed the research question, selected 20 papers, created the prompt kit and evaluation plan. |
+| **Phase 2** (this) | Built the complete working system: RAG pipeline, evaluation framework, two-model comparison, API, and interactive UI. |
+
+### How does it work?
+
+1. **Collect** -- 20 academic PDFs about AI carbon footprints are downloaded from arXiv.
+2. **Chunk** -- Each PDF is split into ~500-word overlapping text pieces.
+3. **Index** -- Each piece is embedded into a vector and stored in a FAISS search index.
+4. **Ask** -- You type a question. The system finds the most relevant pieces.
+5. **Answer** -- An LLM (your choice: Gemini or Azure OpenAI) reads the pieces and writes a cited answer.
+6. **Verify** -- Every citation is validated against what was actually retrieved.
+
+### Choosing your LLM provider
+
+When you open the Streamlit UI, **pick your provider from the sidebar** before doing anything.
+Both providers are pre-configured:
+
+- **Google Gemini** (`gemini-3-flash-preview`) -- fast, good at following citation rules
+- **Azure OpenAI** (`o4-mini`) -- reasoning-focused model from OpenAI
+
+The **Compare Models** page runs the same query through both simultaneously for side-by-side comparison.
+
+---
+
 ## Quick Start
 
 ### 1. Clone and create virtual environment

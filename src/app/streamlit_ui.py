@@ -20,20 +20,19 @@ from src.config import (
     PROJECT_ROOT, PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR,
     MANIFEST_PATH, GENERATION_MODEL, JUDGE_MODEL, EMBED_MODEL_NAME,
     CHUNK_SIZE_TOKENS, CHUNK_OVERLAP_TOKENS, TOP_K, ENHANCED_TOP_N,
-    REPORT_DIR, CHUNK_PREVIEW_LEN, LLM_PROVIDER,
+    REPORT_DIR, LLM_PROVIDER,
     GEMINI_API_KEY, AZURE_API_KEY, AZURE_ENDPOINT,
 )
 from src.utils import sanitize_query
 
-# ── Page config ───────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="LLM Carbon Footprint Research Portal",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────
+
 @st.cache_data(ttl=300)
 def load_manifest() -> pd.DataFrame:
     if MANIFEST_PATH.exists():
@@ -42,14 +41,21 @@ def load_manifest() -> pd.DataFrame:
 
 
 @st.cache_resource
-def load_rag_resources():
+def _load_index_and_embeddings():
+    """Load FAISS index, chunk store, and embedding model (provider-independent)."""
     from sentence_transformers import SentenceTransformer
     from src.rag.rag import load_index
-    from src.llm_client import get_llm_client
     index, store = load_index()
     embed_model = SentenceTransformer(EMBED_MODEL_NAME)
-    client = get_llm_client()
-    return index, store, embed_model, client
+    return index, store, embed_model
+
+
+def get_client_for_provider(provider: str):
+    """Create an LLM client for the chosen provider."""
+    from src.llm_client import GeminiClient, AzureOpenAIClient
+    if provider == "azure_openai":
+        return AzureOpenAIClient()
+    return GeminiClient()
 
 
 def load_eval_results(mode: str) -> list[dict]:
@@ -75,10 +81,13 @@ SAMPLE_QUESTIONS = [
     "What is the difference between operational and embodied carbon emissions in AI?",
 ]
 
-
 # ── Sidebar ───────────────────────────────────────────────────────────────
+
+gemini_ok = bool(GEMINI_API_KEY)
+azure_ok = bool(AZURE_API_KEY and AZURE_ENDPOINT)
+
 PAGES = [
-    "Overview",
+    "Home",
     "Run Pipeline",
     "Ask a Question",
     "Compare Models",
@@ -91,20 +100,40 @@ with st.sidebar:
     page = st.radio("Page", PAGES, label_visibility="collapsed")
 
     st.markdown("---")
-    st.markdown("**Active Configuration**")
-    st.text(f"Provider:    {LLM_PROVIDER}")
-    st.text(f"Generation:  {GENERATION_MODEL}")
-    st.text(f"Judge:       {JUDGE_MODEL}")
-    st.text(f"Embeddings:  {EMBED_MODEL_NAME}")
-    st.text(f"Chunk:       {CHUNK_SIZE_TOKENS}t / {CHUNK_OVERLAP_TOKENS}t")
-    st.text(f"Top-K:       {TOP_K} / {ENHANCED_TOP_N}")
 
-    gemini_ok = bool(GEMINI_API_KEY)
-    azure_ok = bool(AZURE_API_KEY and AZURE_ENDPOINT)
+    # ── Provider chooser ──────────────────────────────────────────────────
+    st.markdown("**Choose LLM Provider**")
+    provider_options = []
+    provider_labels = {}
+    if gemini_ok:
+        provider_options.append("gemini")
+        provider_labels["gemini"] = "Google Gemini"
+    if azure_ok:
+        provider_options.append("azure_openai")
+        provider_labels["azure_openai"] = "Azure OpenAI (o4-mini)"
+
+    if not provider_options:
+        st.error("No LLM provider configured. Add API keys to .env")
+        chosen_provider = None
+    elif len(provider_options) == 1:
+        chosen_provider = provider_options[0]
+        st.info(f"Using: {provider_labels[chosen_provider]}")
+    else:
+        default_idx = provider_options.index(LLM_PROVIDER) if LLM_PROVIDER in provider_options else 0
+        chosen_provider = st.radio(
+            "Provider",
+            provider_options,
+            index=default_idx,
+            format_func=lambda x: provider_labels[x],
+            label_visibility="collapsed",
+        )
+
     st.markdown("---")
-    st.markdown("**Provider Status**")
-    st.text(f"Gemini:      {'ready' if gemini_ok else 'not configured'}")
-    st.text(f"Azure OpenAI:{'ready' if azure_ok else 'not configured'}")
+    st.markdown("**System Info**")
+    st.text(f"Active:     {provider_labels.get(chosen_provider, 'none')}" if chosen_provider else "Active:     none")
+    st.text(f"Embeddings: {EMBED_MODEL_NAME}")
+    st.text(f"Chunk:      {CHUNK_SIZE_TOKENS}t / {CHUNK_OVERLAP_TOKENS}t overlap")
+    st.text(f"Top-K:      {TOP_K} baseline / {ENHANCED_TOP_N} enhanced")
 
     st.markdown("---")
     st.caption("AI Model Development (95-864)")
@@ -113,85 +142,147 @@ with st.sidebar:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# PAGE: OVERVIEW
+# PAGE: HOME
 # ══════════════════════════════════════════════════════════════════════════
-if page == "Overview":
+if page == "Home":
     st.header("LLM Carbon Footprint Research Portal")
-    st.markdown(
-        "A research-grade RAG system for systematic review of carbon emissions "
-        "in Large Language Models. Supports **multi-provider comparison** "
-        "(Google Gemini and Azure OpenAI o4-mini)."
-    )
 
-    st.subheader("Research Question")
-    st.markdown(
-        "> **How do we accurately measure and compare the carbon footprint of "
-        "different LLMs across their lifecycle?**"
-    )
     st.markdown("""
-**Sub-questions:**
-1. What are the major sources of emissions in LLM training vs. inference?
-2. How do different studies measure and report carbon metrics?
-3. What factors (model size, hardware, location) most impact carbon footprint?
-4. How do carbon estimates vary across different LLM families?
-5. What data is missing or inconsistent in current carbon reporting?
+Welcome! This application is a **research assistant** that helps you explore
+what we know about the environmental cost of building and running large AI
+models (like ChatGPT, BLOOM, and others).
+
+It reads 20 academic papers, finds the parts relevant to your question,
+and writes an answer -- citing every source it uses so you can verify it
+yourself.
     """)
 
-    # ── Lifecycle diagram ─────────────────────────────────────────────────
-    st.subheader("Pipeline Lifecycle")
-    st.code("""
-    DATA LAYER                      QUERY LAYER                     OUTPUT LAYER
-    ----------                      -----------                     ------------
-    20 PDF sources                  User query                      Cited answer
-         |                               |                              ^
-         v                               v                              |
-    [Download]                     [Sanitize input]               [Validate citations]
-         |                               |                              ^
-         v                               v                              |
-    [Parse PDF]                    [Classify query type]          [Generate answer]
-    (PyMuPDF)                      direct / synthesis / edge           ^
-         |                               |                              |
-         v                          +---------+---------+               |
-    [Section-aware chunking]        |         |         |               |
-    (500t / 100t overlap)     [Baseline]  [Enhanced]  [Edge]           |
-         |                      top-K     rewrite +    flag            |
-         v                     retrieve   decompose   missing          |
-    [Embed chunks]                  |     multi-query    |             |
-    (all-MiniLM-L6-v2)             |     merge chunks   |             |
-         |                          +--------+---------+              |
-         v                                   |                         |
-    [FAISS IndexFlatIP]  <--- semantic search |                        |
-                                             v                         |
-                                    [LLM Generation] -----------------+
-                                    (Gemini / Azure OpenAI o4-mini)
+    st.markdown("---")
 
-    EVALUATION: 20-query set x 6 metrics x LLM-as-judge scoring
-    COMPARISON: Same queries, same corpus, different LLM providers
-    """, language=None)
+    # ── What is Phase 2? ──────────────────────────────────────────────────
+    st.subheader("What is Phase 2?")
+    st.markdown("""
+This project is part of the course **AI Model Development (95-864)** at CMU.
+It has two phases:
 
-    st.subheader("Corpus")
+**Phase 1** (completed) -- *Research Design*
+- We picked a research question: "How do we measure the carbon footprint of LLMs?"
+- We identified 20 peer-reviewed papers covering this topic.
+- We designed the prompts, evaluation criteria, and analysis framework.
+
+**Phase 2** (this deliverable) -- *Working System*
+- We built a complete, working RAG (Retrieval-Augmented Generation) system
+  that answers questions using those 20 papers as its knowledge base.
+- We support **two different AI providers** (Google Gemini and Azure OpenAI)
+  so you can compare how they answer the same question.
+- We evaluate the system on 20 test queries using 6 quality metrics.
+- Everything is modular, configurable, and reproducible.
+    """)
+
+    st.markdown("---")
+
+    # ── How does it work? ─────────────────────────────────────────────────
+    st.subheader("How does it work?")
+    st.markdown("""
+The system follows these steps, in order:
+
+**Step 1 -- Collect papers.**
+We downloaded 20 academic papers (PDFs) about AI carbon emissions from
+arXiv and other repositories.
+
+**Step 2 -- Break them into pieces.**
+Each PDF is split into small, overlapping text chunks (about 500 words each)
+so the system can look up specific passages quickly.
+
+**Step 3 -- Create a search index.**
+Every chunk is converted into a numerical "embedding" (a vector that captures
+its meaning). These vectors are stored in a FAISS index for fast similarity search.
+
+**Step 4 -- You ask a question.**
+When you type a question, the system converts it into the same kind of vector
+and finds the most similar chunks from the 20 papers.
+
+**Step 5 -- The AI writes an answer.**
+The retrieved chunks are sent to an LLM (your choice of Google Gemini or Azure
+OpenAI o4-mini) along with strict rules: cite every claim, don't fabricate,
+flag missing evidence.
+
+**Step 6 -- We check the answer.**
+Every citation in the answer is validated against the chunks that were
+actually retrieved. If the AI cites something it didn't receive, we flag it.
+    """)
+
+    st.markdown("---")
+
+    # ── What can I do here? ───────────────────────────────────────────────
+    st.subheader("What can I do in this app?")
+    st.markdown("""
+Use the **sidebar** on the left to navigate between pages:
+
+| Page | What it does |
+|---|---|
+| **Run Pipeline** | Executes the full system step-by-step so you can see each stage working |
+| **Ask a Question** | Type any question about AI carbon footprints and get a cited answer |
+| **Compare Models** | Run the same question through both Gemini and Azure OpenAI side-by-side |
+| **Evaluation** | View the 20-query test set and how the system scored on each metric |
+| **Deliverables** | Checklist of everything required for Phase 2, with file-exists checks |
+    """)
+
+    st.markdown("---")
+
+    # ── Deliverables summary ──────────────────────────────────────────────
+    st.subheader("Phase 2 Deliverables")
+    st.markdown("""
+| # | Deliverable | Description | Where to find it |
+|---|---|---|---|
+| D1 | Code repository | Modular Python codebase with Makefile automation | `src/`, `Makefile` |
+| D2 | Data manifest | 20 peer-reviewed sources with metadata | `data/data_manifest.csv` |
+| D3 | RAG pipeline | Baseline + enhanced retrieval with citation validation | `src/rag/` |
+| D4 | Evaluation framework | 20 test queries, 6 metrics, LLM-as-judge | `src/eval/` |
+| D5 | Evaluation report | Auto-generated Markdown report | `report/phase2/` |
+| D6 | API backend | FastAPI REST API with 5 endpoints | `src/app/app.py` |
+| D7 | Interactive UI | This Streamlit application | `src/app/streamlit_ui.py` |
+| D8 | Model comparison | Side-by-side Gemini vs Azure OpenAI | Compare Models page |
+| D9 | Security | Input sanitization, prompt-injection protection | `src/utils.py` |
+    """)
+
+    st.markdown("---")
+
+    # ── Corpus overview ───────────────────────────────────────────────────
+    st.subheader("The Corpus (20 Papers)")
+    st.markdown(
+        "These are the papers the system uses as its knowledge base. "
+        "All are peer-reviewed or published at top-tier venues."
+    )
     df = load_manifest()
     if not df.empty:
-        st.write(f"**{len(df)} sources**, spanning {int(df['year'].min())}--{int(df['year'].max())}.")
         st.dataframe(
-            df[["source_id", "title", "authors", "year", "source_type", "venue", "tags"]],
+            df[["source_id", "title", "year", "source_type", "venue"]],
             width="stretch", hide_index=True,
         )
     else:
         st.warning("Manifest not found. Run `make download` first.")
 
-    st.subheader("Phase 2 Deliverables")
-    st.markdown("""
-- **D1 -- Code repository**: Modular `src/` packages, `Makefile`, env-driven config, multi-provider LLM abstraction.
-- **D2 -- Data manifest**: 20-source corpus with full A3 schema in `data/data_manifest.csv`.
-- **D3 -- RAG pipeline**: Baseline and enhanced pipelines with citation validation and trust behaviors.
-- **D4 -- Evaluation framework**: 20-query set scored on 6 metrics using LLM-as-judge.
-- **D5 -- Evaluation report**: Auto-generated at `report/phase2/evaluation_report.md`.
-- **D6 -- API backend**: FastAPI REST API with `/query`, `/corpus`, `/evaluation`, `/logs` endpoints.
-- **D7 -- Interactive UI**: This Streamlit app with pipeline orchestrator, chat, and model comparison.
-- **D8 -- Model comparison**: Side-by-side Gemini vs Azure OpenAI on identical queries.
-- **D9 -- Security**: Input sanitization, prompt-injection protection, API key isolation.
-    """)
+    st.markdown("---")
+
+    # ── Provider status ───────────────────────────────────────────────────
+    st.subheader("LLM Provider Status")
+    st.markdown(
+        "This system supports two LLM providers. Use the **sidebar** to switch between them."
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Google Gemini**")
+        if gemini_ok:
+            st.success("Configured and ready")
+        else:
+            st.warning("Not configured. Add GEMINI_API_KEY to .env")
+    with col2:
+        st.markdown("**Azure OpenAI (o4-mini)**")
+        if azure_ok:
+            st.success("Configured and ready")
+        else:
+            st.warning("Not configured. Add AZURE_ENDPOINT and AZURE_API_KEY to .env")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -200,13 +291,19 @@ if page == "Overview":
 elif page == "Run Pipeline":
     st.header("Run Full Pipeline")
     st.markdown(
-        "Execute the entire Phase 2 pipeline end-to-end. "
+        "Execute the entire system end-to-end. "
         "Each step shows exactly what happens behind the scenes."
     )
 
+    if not chosen_provider:
+        st.error("No LLM provider configured. Add API keys to .env first.")
+        st.stop()
+
+    provider_name = provider_labels.get(chosen_provider, chosen_provider)
+    st.info(f"Using: **{provider_name}** (change in sidebar)")
+
     if st.button("Run Full Pipeline", type="primary"):
 
-        # Step 1
         with st.status("Step 1/6: Loading corpus manifest...", expanded=True) as s1:
             df = load_manifest()
             if df.empty:
@@ -214,13 +311,8 @@ elif page == "Run Pipeline":
                 st.stop()
             st.write(f"Loaded **{len(df)} sources**.")
             st.write(f"Types: {df['source_type'].value_counts().to_dict()}")
-            st.dataframe(
-                df[["source_id", "title", "year", "source_type"]],
-                width="stretch", hide_index=True,
-            )
             s1.update(label=f"Step 1/6: Corpus loaded ({len(df)} sources)", state="complete")
 
-        # Step 2
         with st.status("Step 2/6: Verifying ingestion...", expanded=True) as s2:
             idx_path = PROCESSED_DIR / "faiss_index.bin"
             store_path = PROCESSED_DIR / "chunk_store.json"
@@ -228,22 +320,20 @@ elif page == "Run Pipeline":
                 st.error("FAISS index or chunk store missing. Run `make ingest`.")
                 st.stop()
             store_data = json.loads(store_path.read_text(encoding="utf-8"))
-            st.write(f"FAISS index: `{idx_path.name}` exists.")
-            st.write(f"Chunk store: **{len(store_data)} chunks** across "
+            st.write(f"Chunk store: **{len(store_data)} chunks** from "
                       f"**{len({c['source_id'] for c in store_data})} sources**.")
             s2.update(label=f"Step 2/6: Ingestion verified ({len(store_data)} chunks)", state="complete")
 
-        # Step 3
-        with st.status(f"Step 3/6: Loading models ({LLM_PROVIDER})...", expanded=True) as s3:
+        with st.status(f"Step 3/6: Loading models ({provider_name})...", expanded=True) as s3:
             t0 = time.time()
-            index, store, embed_model, client = load_rag_resources()
+            index, store, embed_model = _load_index_and_embeddings()
+            client = get_client_for_provider(chosen_provider)
             lt = time.time() - t0
-            st.write(f"Embedding model: `{EMBED_MODEL_NAME}` | LLM provider: `{LLM_PROVIDER}`")
-            st.write(f"Generation model: `{GENERATION_MODEL}` | FAISS vectors: {index.ntotal}")
-            st.write(f"Load time: {lt:.1f}s")
+            st.write(f"Embedding model: `{EMBED_MODEL_NAME}`")
+            st.write(f"LLM provider: **{provider_name}**")
+            st.write(f"FAISS vectors: {index.ntotal} | Load time: {lt:.1f}s")
             s3.update(label=f"Step 3/6: Models loaded ({lt:.1f}s)", state="complete")
 
-        # Step 4
         with st.status("Step 4/6: Baseline RAG...", expanded=True) as s4:
             from src.rag.rag import run_rag
             bq = "What are the major sources of carbon emissions in LLM training?"
@@ -251,14 +341,12 @@ elif page == "Run Pipeline":
             t0 = time.time()
             br = run_rag(bq, index, store, embed_model, client, top_k=TOP_K, mode="baseline")
             et = time.time() - t0
-            st.write(f"Retrieved {len(br['retrieved_chunks'])} chunks in {et:.1f}s")
-            st.write(f"**Answer** (preview): {br['answer'][:400]}...")
             cv = br["citation_validation"]
-            st.write(f"Citations: {cv['valid_citations']}/{cv['total_citations']} valid "
-                      f"(precision={cv.get('citation_precision', 'N/A')})")
-            s4.update(label=f"Step 4/6: Baseline RAG ({et:.1f}s, {cv['valid_citations']}/{cv['total_citations']} cites)", state="complete")
+            st.write(f"Retrieved {len(br['retrieved_chunks'])} chunks in {et:.1f}s")
+            st.write(f"Citations: {cv['valid_citations']}/{cv['total_citations']} valid")
+            st.write(f"**Answer preview:** {br['answer'][:300]}...")
+            s4.update(label=f"Step 4/6: Baseline RAG ({et:.1f}s)", state="complete")
 
-        # Step 5
         with st.status("Step 5/6: Enhanced RAG...", expanded=True) as s5:
             from src.rag.enhance_query_rewriting import run_enhanced_rag
             eq = "Compare Strubell et al. and Patterson et al. on measurement methodology."
@@ -266,32 +354,26 @@ elif page == "Run Pipeline":
             t0 = time.time()
             er = run_enhanced_rag(eq, index, store, embed_model, client)
             et = time.time() - t0
-            st.write(f"Query type: {er.get('query_type')} | Rewritten: {er.get('rewritten_query', 'N/A')}")
             sqs = er.get("sub_queries", [])
-            if sqs:
-                st.write(f"Sub-queries: {len(sqs)}")
-                for i, sq in enumerate(sqs, 1):
-                    st.text(f"  {i}. {sq}")
-            st.write(f"Merged chunks: {len(er['retrieved_chunks'])}")
-            st.write(f"**Synthesis** (preview): {er['answer'][:400]}...")
             ecv = er["citation_validation"]
-            st.write(f"Citations: {ecv['valid_citations']}/{ecv['total_citations']} valid")
-            s5.update(label=f"Step 5/6: Enhanced RAG ({et:.1f}s, {len(sqs)} sub-queries)", state="complete")
+            st.write(f"Query type: {er.get('query_type')} | Sub-queries: {len(sqs)}")
+            st.write(f"Merged chunks: {len(er['retrieved_chunks'])} | Citations: {ecv['valid_citations']}/{ecv['total_citations']}")
+            st.write(f"**Synthesis preview:** {er['answer'][:300]}...")
+            s5.update(label=f"Step 5/6: Enhanced RAG ({et:.1f}s)", state="complete")
 
-        # Step 6
         with st.status("Step 6/6: Summary...", expanded=True) as s6:
             st.write("**Pipeline executed successfully.**")
-            st.write(f"- Corpus: {len(df)} sources loaded and verified")
-            st.write(f"- Ingestion: {len(store_data)} chunks indexed in FAISS")
-            st.write(f"- Baseline RAG: top-{TOP_K} retrieval + {GENERATION_MODEL} generation")
-            st.write(f"- Enhanced RAG: rewriting + decomposition + merged retrieval")
-            st.write(f"- Trust: citation validation, uncertainty flagging active")
-            st.write(f"- Provider: {LLM_PROVIDER} ({GENERATION_MODEL})")
+            st.write(f"- Corpus: {len(df)} sources")
+            st.write(f"- Chunks indexed: {len(store_data)}")
+            st.write(f"- Provider: {provider_name}")
+            st.write(f"- Baseline RAG: working")
+            st.write(f"- Enhanced RAG: working")
+            st.write(f"- Citation validation: active")
             st.write("")
-            st.write("Full evaluation: `make eval-both` | Report: `make report`")
+            st.write("To run full evaluation: `make eval-both` then `make report`")
             s6.update(label="Step 6/6: Done", state="complete")
 
-        st.success("Pipeline complete.")
+        st.success("All steps completed successfully.")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -299,8 +381,14 @@ elif page == "Run Pipeline":
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "Ask a Question":
     st.header("Ask a Research Question")
+
+    if not chosen_provider:
+        st.error("No LLM provider configured. Add API keys to .env first.")
+        st.stop()
+
+    provider_name = provider_labels.get(chosen_provider, chosen_provider)
     st.markdown(
-        f"Queries the **{LLM_PROVIDER}** ({GENERATION_MODEL}) RAG pipeline. "
+        f"Using **{provider_name}**. Change provider in the sidebar. "
         "Input is sanitized for prompt-injection protection."
     )
 
@@ -325,7 +413,8 @@ elif page == "Ask a Question":
                 st.caption(
                     f"Citations: {cv['valid_citations']}/{cv['total_citations']} | "
                     f"Precision: {cv.get('citation_precision', 'N/A')} | "
-                    f"Mode: {msg.get('mode', 'N/A')}"
+                    f"Mode: {msg.get('mode', 'N/A')} | "
+                    f"Provider: {msg.get('provider', 'N/A')}"
                 )
 
     pending = None
@@ -337,7 +426,6 @@ elif page == "Ask a Question":
     query = pending or user_input
 
     if query:
-        # Sanitize
         try:
             query = sanitize_query(query)
         except ValueError as e:
@@ -350,8 +438,9 @@ elif page == "Ask a Question":
 
         with st.chat_message("assistant"):
             with st.status("Running RAG pipeline...", expanded=True) as ps:
-                st.write(f"Provider: {LLM_PROVIDER} | Mode: {mode} | Top-K: {top_k}")
-                index, store, embed_model, client = load_rag_resources()
+                st.write(f"Provider: {provider_name} | Mode: {mode} | Top-K: {top_k}")
+                index, store, embed_model = _load_index_and_embeddings()
+                client = get_client_for_provider(chosen_provider)
 
                 from src.rag.rag import run_rag
                 from src.rag.enhance_query_rewriting import run_enhanced_rag
@@ -363,7 +452,7 @@ elif page == "Ask a Question":
                     result = run_rag(query, index, store, embed_model, client,
                                      top_k=top_k, mode=mode)
                 elapsed = time.time() - t0
-                ps.update(label=f"Pipeline complete ({elapsed:.1f}s)", state="complete")
+                ps.update(label=f"Done ({elapsed:.1f}s, {provider_name})", state="complete")
 
             st.markdown(result["answer"])
 
@@ -388,6 +477,7 @@ elif page == "Ask a Question":
             "citation_validation": cv,
             "tokens": result["tokens"],
             "mode": mode,
+            "provider": provider_name,
         })
 
 
@@ -398,7 +488,7 @@ elif page == "Compare Models":
     st.header("Model Comparison: Gemini vs Azure OpenAI")
     st.markdown(
         "Run the **same query** through both LLM providers on the same corpus "
-        "and compare answer quality, latency, citations, and token usage side-by-side."
+        "and compare answer quality, latency, and citations side-by-side."
     )
 
     if not gemini_ok:
@@ -418,14 +508,11 @@ elif page == "Compare Models":
             st.error(str(e))
             st.stop()
 
-        # Load shared resources (index, store, embeddings -- these are provider-independent)
-        from sentence_transformers import SentenceTransformer
         from src.rag.rag import load_index, run_rag
         from src.rag.enhance_query_rewriting import run_enhanced_rag
         from src.llm_client import GeminiClient, AzureOpenAIClient
 
-        index, store = load_index()
-        embed_model = SentenceTransformer(EMBED_MODEL_NAME)
+        index, store, embed_model = _load_index_and_embeddings()
 
         st.markdown(f"**Query:** {query_to_run}")
         st.markdown(f"**Mode:** {comp_mode}")
@@ -433,9 +520,8 @@ elif page == "Compare Models":
 
         col_g, col_a = st.columns(2)
 
-        # ── Gemini ────────────────────────────────────────────────────────
         with col_g:
-            st.subheader("Gemini")
+            st.subheader("Google Gemini")
             with st.status("Running...", expanded=True) as sg:
                 try:
                     gc = GeminiClient()
@@ -448,8 +534,7 @@ elif page == "Compare Models":
                     sg.update(label=f"Gemini ({g_time:.1f}s)", state="complete")
                 except Exception as exc:
                     st.error(f"Gemini failed: {exc}")
-                    gr = None
-                    g_time = None
+                    gr, g_time = None, None
                     sg.update(label="Gemini: failed", state="error")
 
             if gr:
@@ -460,9 +545,7 @@ elif page == "Compare Models":
                 st.metric("Citation Precision",
                           f"{gcv['citation_precision']:.2f}" if gcv.get("citation_precision") is not None else "N/A")
                 st.metric("Tokens (in/out)", f"{gr['tokens'].get('input', 0)} / {gr['tokens'].get('output', 0)}")
-                st.metric("Chunks Retrieved", str(len(gr["retrieved_chunks"])))
 
-        # ── Azure OpenAI ──────────────────────────────────────────────────
         with col_a:
             st.subheader("Azure OpenAI (o4-mini)")
             with st.status("Running...", expanded=True) as sa:
@@ -477,8 +560,7 @@ elif page == "Compare Models":
                     sa.update(label=f"Azure OpenAI ({a_time:.1f}s)", state="complete")
                 except Exception as exc:
                     st.error(f"Azure OpenAI failed: {exc}")
-                    ar = None
-                    a_time = None
+                    ar, a_time = None, None
                     sa.update(label="Azure: failed", state="error")
 
             if ar:
@@ -489,54 +571,29 @@ elif page == "Compare Models":
                 st.metric("Citation Precision",
                           f"{acv['citation_precision']:.2f}" if acv.get("citation_precision") is not None else "N/A")
                 st.metric("Tokens (in/out)", f"{ar['tokens'].get('input', 0)} / {ar['tokens'].get('output', 0)}")
-                st.metric("Chunks Retrieved", str(len(ar["retrieved_chunks"])))
 
-        # ── Summary table ─────────────────────────────────────────────────
         if gr and ar:
             st.markdown("---")
             st.subheader("Comparison Summary")
-            gcv = gr["citation_validation"]
-            acv = ar["citation_validation"]
-            comp_data = pd.DataFrame([
-                {
-                    "Metric": "Latency (s)",
-                    "Gemini": f"{g_time:.1f}",
-                    "Azure OpenAI": f"{a_time:.1f}",
-                    "Winner": "Gemini" if g_time < a_time else "Azure",
-                },
-                {
-                    "Metric": "Answer Length (chars)",
-                    "Gemini": str(len(gr["answer"])),
-                    "Azure OpenAI": str(len(ar["answer"])),
-                    "Winner": "--",
-                },
-                {
-                    "Metric": "Valid Citations",
-                    "Gemini": str(gcv["valid_citations"]),
-                    "Azure OpenAI": str(acv["valid_citations"]),
-                    "Winner": "Gemini" if gcv["valid_citations"] > acv["valid_citations"] else
-                              "Azure" if acv["valid_citations"] > gcv["valid_citations"] else "Tie",
-                },
-                {
-                    "Metric": "Citation Precision",
-                    "Gemini": f"{gcv['citation_precision']:.2f}" if gcv.get("citation_precision") is not None else "N/A",
-                    "Azure OpenAI": f"{acv['citation_precision']:.2f}" if acv.get("citation_precision") is not None else "N/A",
-                    "Winner": "--",
-                },
-                {
-                    "Metric": "Input Tokens",
-                    "Gemini": str(gr["tokens"].get("input", 0)),
-                    "Azure OpenAI": str(ar["tokens"].get("input", 0)),
-                    "Winner": "--",
-                },
-                {
-                    "Metric": "Output Tokens",
-                    "Gemini": str(gr["tokens"].get("output", 0)),
-                    "Azure OpenAI": str(ar["tokens"].get("output", 0)),
-                    "Winner": "--",
-                },
-            ])
-            st.dataframe(comp_data, width="stretch", hide_index=True)
+            gcv, acv = gr["citation_validation"], ar["citation_validation"]
+            st.dataframe(pd.DataFrame([
+                {"Metric": "Latency (s)", "Gemini": f"{g_time:.1f}", "Azure OpenAI": f"{a_time:.1f}",
+                 "Winner": "Gemini" if g_time < a_time else "Azure"},
+                {"Metric": "Answer Length", "Gemini": str(len(gr["answer"])), "Azure OpenAI": str(len(ar["answer"])),
+                 "Winner": "--"},
+                {"Metric": "Valid Citations", "Gemini": str(gcv["valid_citations"]),
+                 "Azure OpenAI": str(acv["valid_citations"]),
+                 "Winner": "Gemini" if gcv["valid_citations"] > acv["valid_citations"] else
+                           "Azure" if acv["valid_citations"] > gcv["valid_citations"] else "Tie"},
+                {"Metric": "Citation Precision",
+                 "Gemini": f"{gcv['citation_precision']:.2f}" if gcv.get("citation_precision") is not None else "N/A",
+                 "Azure OpenAI": f"{acv['citation_precision']:.2f}" if acv.get("citation_precision") is not None else "N/A",
+                 "Winner": "--"},
+                {"Metric": "Input Tokens", "Gemini": str(gr["tokens"].get("input", 0)),
+                 "Azure OpenAI": str(ar["tokens"].get("input", 0)), "Winner": "--"},
+                {"Metric": "Output Tokens", "Gemini": str(gr["tokens"].get("output", 0)),
+                 "Azure OpenAI": str(ar["tokens"].get("output", 0)), "Winner": "--"},
+            ]), width="stretch", hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -576,8 +633,7 @@ elif page == "Evaluation":
             rows = []
             for r in results:
                 rows.append({
-                    "ID": r["query_id"],
-                    "Type": r["query_type"],
+                    "ID": r["query_id"], "Type": r["query_type"],
                     "Ground.": r["groundedness"].get("score"),
                     "Relev.": r["answer_relevance"].get("score"),
                     "Ctx P.": r.get("context_precision", {}).get("score"),
@@ -620,23 +676,23 @@ elif page == "Evaluation":
 # PAGE: DELIVERABLES
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "Deliverables":
-    st.header("Phase 2 Deliverables")
+    st.header("Phase 2 Deliverables Checklist")
 
     def _check(path: Path) -> str:
         return "OK" if path.exists() else "MISSING"
 
     st.subheader("D1: Code Repository")
     for item, path in [
-        ("src/config.py",                   PROJECT_ROOT / "src" / "config.py"),
-        ("src/llm_client.py",               PROJECT_ROOT / "src" / "llm_client.py"),
-        ("src/utils.py",                    PROJECT_ROOT / "src" / "utils.py"),
-        ("src/ingest/",                     PROJECT_ROOT / "src" / "ingest" / "ingest.py"),
-        ("src/rag/",                        PROJECT_ROOT / "src" / "rag" / "rag.py"),
-        ("src/eval/",                       PROJECT_ROOT / "src" / "eval" / "evaluation.py"),
-        ("src/app/",                        PROJECT_ROOT / "src" / "app" / "app.py"),
-        ("Makefile",                        PROJECT_ROOT / "Makefile"),
-        ("requirements.txt",               PROJECT_ROOT / "requirements.txt"),
-        (".env.example",                    PROJECT_ROOT / ".env.example"),
+        ("src/config.py",       PROJECT_ROOT / "src" / "config.py"),
+        ("src/llm_client.py",   PROJECT_ROOT / "src" / "llm_client.py"),
+        ("src/utils.py",        PROJECT_ROOT / "src" / "utils.py"),
+        ("src/ingest/",         PROJECT_ROOT / "src" / "ingest" / "ingest.py"),
+        ("src/rag/",            PROJECT_ROOT / "src" / "rag" / "rag.py"),
+        ("src/eval/",           PROJECT_ROOT / "src" / "eval" / "evaluation.py"),
+        ("src/app/",            PROJECT_ROOT / "src" / "app" / "app.py"),
+        ("Makefile",            PROJECT_ROOT / "Makefile"),
+        ("requirements.txt",   PROJECT_ROOT / "requirements.txt"),
+        (".env.example",        PROJECT_ROOT / ".env.example"),
     ]:
         st.text(f"  [{_check(path)}] {item}")
 
@@ -664,34 +720,33 @@ elif page == "Deliverables":
         with st.expander("View report"):
             st.markdown(report_path.read_text(encoding="utf-8"))
     else:
-        st.warning("Report not generated. Run: `make report`")
+        st.warning("Report not generated yet. Run: `make report`")
 
     st.subheader("D6: API Backend")
     st.dataframe(pd.DataFrame([
         {"Method": "GET", "Endpoint": "/health", "Description": "Server health + provider info"},
-        {"Method": "POST", "Endpoint": "/query", "Description": "Run RAG query (sanitized)"},
+        {"Method": "POST", "Endpoint": "/query", "Description": "Run RAG query (sanitized input)"},
         {"Method": "GET", "Endpoint": "/corpus", "Description": "Corpus manifest"},
         {"Method": "GET", "Endpoint": "/evaluation", "Description": "Eval results + metrics"},
         {"Method": "GET", "Endpoint": "/logs", "Description": "Run logs"},
     ]), width="stretch", hide_index=True)
 
     st.subheader("D7-D8: UI + Model Comparison")
-    st.write("This Streamlit app. Pages: Overview, Run Pipeline, Ask a Question, "
+    st.write("This Streamlit app with 6 pages: Home, Run Pipeline, Ask a Question, "
              "Compare Models, Evaluation, Deliverables.")
 
     st.subheader("D9: Security")
     st.markdown("""
-- **API key isolation**: Keys stored in `.env` (git-ignored), never in source code.
-- **Prompt-injection protection**: `src/utils.sanitize_query()` strips control characters,
-  enforces length limits, and rejects injection patterns before any query enters the LLM.
-- **Input validation**: FastAPI Pydantic schemas validate all API request fields.
+- **API key isolation**: Keys in `.env` (git-ignored), never in source code.
+- **Prompt-injection protection**: `src/utils.sanitize_query()` at every entry point.
+- **Input validation**: FastAPI Pydantic schemas validate all API requests.
 - **PDF exclusion**: Downloaded PDFs are git-ignored; re-downloaded at runtime.
     """)
 
     st.subheader("AI Usage Disclosure")
     st.dataframe(pd.DataFrame([
-        {"Tool": "Gemini (gemini-3-flash-preview)", "Purpose": "RAG generation + eval judging", "Review": "Prompt engineering, guardrails"},
-        {"Tool": "Azure OpenAI (o4-mini)", "Purpose": "RAG generation + comparison", "Review": "Same prompts, side-by-side evaluation"},
+        {"Tool": "Google Gemini", "Purpose": "RAG generation + eval judging", "Review": "Prompt engineering, guardrails"},
+        {"Tool": "Azure OpenAI (o4-mini)", "Purpose": "RAG generation + model comparison", "Review": "Same prompts, side-by-side eval"},
         {"Tool": "Cursor AI", "Purpose": "Code scaffolding", "Review": "Full code review and testing"},
         {"Tool": "sentence-transformers", "Purpose": "Embeddings (all-MiniLM-L6-v2)", "Review": "Configuration only"},
     ]), width="stretch", hide_index=True)

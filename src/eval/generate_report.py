@@ -72,7 +72,7 @@ def generate_report() -> Path:
         f"**Group**: Group 4 -- Dhiksha Rathis, Shreya Verma",
         f"**Generated**: {ts}", "", "---", "",
         "## 1. System Overview", "",
-        "- **Corpus**: 15 sources (8 peer-reviewed, 4 technical reports, 2 tools, 1 standards)",
+        "- **Corpus**: 20 sources (14 peer-reviewed, 3 technical reports, 3 tools/workshops)",
         f"- **Chunking**: Section-aware, {CHUNK_SIZE_TOKENS} tokens, {CHUNK_OVERLAP_TOKENS}-token overlap",
         f"- **Embeddings**: {EMBED_MODEL_NAME}",
         "- **Index**: FAISS IndexFlatIP (cosine similarity)",

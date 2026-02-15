@@ -6,7 +6,6 @@ import argparse
 import datetime
 import json
 import re
-from pathlib import Path
 
 import faiss
 import numpy as np
