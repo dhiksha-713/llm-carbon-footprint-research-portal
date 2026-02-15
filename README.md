@@ -1,194 +1,252 @@
-# Personal Research Portal -- Carbon Footprint of LLMs
+# LLM Carbon Footprint Research Portal
 
-**Course**: AI Model Development (95-864)  
-**Group 4**: Dhiksha Rathis, Shreya Verma  
-**Domain**: Green AI / Sustainable Computing  
+A research-grade RAG system for systematic review of carbon emissions in Large Language Models.  
+Supports **multi-provider LLM comparison** (Google Gemini and Azure OpenAI o4-mini).
 
-## Research Question
+**Course**: AI Model Development (95-864) | **Group 4**: Dhiksha Rathis, Shreya Verma | CMU Spring 2026
 
-How do we accurately measure and compare the carbon footprint of different LLMs across their lifecycle?
+---
 
-### Sub-questions (Phase 1)
+## Quick Start
 
-1. What are the major sources of emissions in LLM training vs. inference?
-2. How do different studies measure and report carbon metrics?
-3. What factors (model size, hardware, location) most impact carbon footprint?
-4. How do carbon estimates vary across different LLM families?
-5. What data is missing or inconsistent in current carbon reporting?
+### 1. Clone and create virtual environment
+
+```bash
+git clone <repo-url>
+cd llm-carbon-footprint-research-portal
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 2. Install dependencies
+
+```bash
+make install
+# or: pip install -r requirements.txt
+```
+
+### 3. Configure API keys
+
+```bash
+cp .env.example .env
+# Edit .env and fill in your API keys
+```
+
+**Required fields in `.env`:**
+
+| Variable | Description |
+|---|---|
+| `LLM_PROVIDER` | `gemini` or `azure_openai` (which provider to use by default) |
+| `GEMINI_API_KEY` | Google Gemini API key (needed for Gemini and model comparison) |
+| `AZURE_ENDPOINT` | Azure OpenAI endpoint URL (needed for Azure and model comparison) |
+| `AZURE_API_KEY` | Azure OpenAI API key |
+| `AZURE_API_VERSION` | Azure API version (default: `2024-12-01-preview`) |
+| `GENERATION_MODEL` | Model/deployment name (`gemini-3-flash-preview` or `o4-mini`) |
+| `JUDGE_MODEL` | Judge model for evaluation scoring |
+
+> **Security**: `.env` is in `.gitignore` and is never committed. API keys never appear in source code.
+
+### 4. Download corpus PDFs
+
+```bash
+make download
+```
+
+Downloads 20 peer-reviewed papers from arXiv and ACL Anthology into `data/raw/`.  
+PDFs are git-ignored and stored locally only.
+
+### 5. Ingest (parse, chunk, embed, index)
+
+```bash
+make ingest
+```
+
+Parses PDFs with PyMuPDF, creates section-aware chunks (500t/100t overlap), embeds with `all-MiniLM-L6-v2`, and builds a FAISS index.
+
+### 6. Launch the application
+
+**Streamlit UI** (recommended for demo):
+
+```bash
+make ui
+# Opens at http://localhost:8501
+```
+
+**FastAPI backend** (for programmatic access):
+
+```bash
+make serve
+# Opens at http://localhost:8000/docs
+```
+
+### 7. Run evaluation
+
+```bash
+make eval-both    # Run 20-query eval on both baseline and enhanced pipelines
+make report       # Generate evaluation report
+```
+
+---
+
+## Architecture
+
+```
+User Query
+    |
+    v
+[Input Sanitization] -- prompt-injection protection
+    |
+    v
+[Query Classification] -- direct / synthesis / multihop / edge_case
+    |
+    +-- Baseline: top-K semantic retrieval from FAISS
+    |
+    +-- Enhanced: query rewriting + decomposition + multi-sub-query retrieval + merge
+    |
+    v
+[LLM Generation] -- Gemini or Azure OpenAI (configurable via LLM_PROVIDER)
+    |
+    v
+[Citation Validation] -- verify every (source_id, chunk_id) against retrieved chunks
+    |
+    v
+[Answer + Reference List]
+```
+
+---
 
 ## Repository Structure
 
 ```
-├── README.md
-├── requirements.txt
-├── Makefile
-├── .env.example
+llm-carbon-footprint-research-portal/
+├── .env.example              # Template for API keys and config
+├── .gitignore                # Excludes .env, PDFs, processed data, venv
+├── Makefile                  # Build automation (install, download, ingest, eval, serve, ui)
+├── README.md                 # This file
+├── requirements.txt          # Python dependencies
 ├── data/
-│   ├── data_manifest.csv
-│   ├── raw/
-│   └── processed/
+│   ├── data_manifest.csv     # 20-source corpus manifest (A3 schema)
+│   ├── raw/                  # Downloaded PDFs (git-ignored)
+│   └── processed/            # FAISS index + chunk store (git-ignored)
 ├── src/
-│   ├── config.py                      # Centralized configuration (env-driven)
+│   ├── config.py             # Centralized env-driven configuration
+│   ├── llm_client.py         # Provider-agnostic LLM abstraction (Gemini + Azure)
+│   ├── utils.py              # Input sanitization, prompt-injection protection
 │   ├── ingest/
-│   │   ├── download_sources.py        # PDF downloader
-│   │   └── ingest.py                  # Parse -> chunk -> embed -> FAISS index
+│   │   ├── download_sources.py   # PDF downloader (arXiv, ACL Anthology)
+│   │   └── ingest.py             # PDF parse → chunk → embed → FAISS index
 │   ├── rag/
-│   │   ├── rag.py                     # Baseline RAG (Gemini + FAISS)
-│   │   └── enhance_query_rewriting.py # Query rewriting + decomposition
+│   │   ├── rag.py                # Baseline RAG pipeline
+│   │   └── enhance_query_rewriting.py  # Enhanced RAG (rewrite + decompose)
 │   ├── eval/
-│   │   ├── evaluation.py              # 20-query eval set + LLM-as-judge
-│   │   └── generate_report.py         # Markdown report generator
+│   │   ├── evaluation.py         # 20-query eval set + LLM-as-judge scoring
+│   │   └── generate_report.py    # Markdown report generator
 │   └── app/
-│       ├── app.py                     # FastAPI backend
-│       └── streamlit_ui.py            # Streamlit interactive UI
-├── outputs/
-├── logs/
-└── report/
-    ├── phase1/                        # Framing brief, prompt kit, eval sheet, analysis memo
-    └── phase2/                        # Evaluation report
+│       ├── app.py                # FastAPI backend
+│       └── streamlit_ui.py       # Streamlit interactive UI
+├── report/phase2/            # Generated evaluation report
+├── logs/                     # RAG run logs (git-ignored)
+└── outputs/                  # Evaluation results (git-ignored)
 ```
 
-## Quick Start
+---
 
-```bash
-# 1. Clone and setup
-cp .env.example .env
-# Edit .env with your GEMINI_API_KEY
+## Makefile Targets
 
-# 2. Install
-pip install -r requirements.txt
+| Target | Command | Description |
+|---|---|---|
+| `make install` | `pip install -r requirements.txt` | Install all dependencies |
+| `make download` | `python -m src.ingest.download_sources` | Download corpus PDFs |
+| `make ingest` | `python -m src.ingest.ingest` | Parse, chunk, embed, build FAISS index |
+| `make query` | `python -m src.rag.rag --query "..."` | Run a single RAG query (CLI) |
+| `make eval-baseline` | `python -m src.eval.evaluation --mode baseline` | Evaluate baseline pipeline |
+| `make eval-enhanced` | `python -m src.eval.evaluation --mode enhanced` | Evaluate enhanced pipeline |
+| `make eval-both` | `python -m src.eval.evaluation --mode both` | Evaluate both pipelines |
+| `make report` | `python -m src.eval.generate_report` | Generate evaluation report |
+| `make serve` | `uvicorn src.app.app:app` | Start FastAPI backend |
+| `make ui` | `streamlit run src/app/streamlit_ui.py` | Start Streamlit UI |
+| `make clean` | Remove generated artifacts | Clean processed data, logs, outputs |
+| `make all` | Full pipeline | install → download → ingest → eval → report |
 
-# 3. Download corpus PDFs
-python -m src.ingest.download_sources
+---
 
-# 4. Ingest (parse, chunk, embed, index)
-python -m src.ingest.ingest
+## LLM Provider Configuration
 
-# 5. Query
-python -m src.rag.rag --query "What are the major sources of carbon emissions in LLM training?"
+The system supports two LLM providers via a **feature flag** (`LLM_PROVIDER`):
 
-# 6. Evaluate
-python -m src.eval.evaluation --mode both
+### Google Gemini
 
-# 7. Generate report
-python -m src.eval.generate_report
-
-# 8. Launch FastAPI server
-make serve
-# or: uvicorn src.app.app:app --host 0.0.0.0 --port 8000 --reload
-
-# 9. Launch Streamlit UI
-make ui
-# or: streamlit run src/app/streamlit_ui.py --server.port 8502
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_key_here
+GENERATION_MODEL=gemini-3-flash-preview
+JUDGE_MODEL=gemini-3-flash-preview
 ```
 
-Or: `make all` then `make ui`
+### Azure OpenAI (o4-mini)
 
-### Streamlit UI
+```env
+LLM_PROVIDER=azure_openai
+AZURE_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_API_KEY=your_key_here
+AZURE_API_VERSION=2024-12-01-preview
+GENERATION_MODEL=o4-mini
+JUDGE_MODEL=o4-mini
+```
 
-The Streamlit interface at `http://localhost:8502` provides:
+The **Compare Models** page in the Streamlit UI runs the same query through both providers simultaneously, regardless of which is set as default.
 
-| Page | Description |
-|------|-------------|
-| **Home** | Project overview, research question, Phase 2 deliverables, pipeline architecture, evaluation metrics |
-| **RAG Query** | Interactive query interface with baseline/enhanced mode, retrieved chunks, citation validation |
-| **Corpus Explorer** | Browse all 15 sources with filters (type, year, search), metadata, year distribution chart |
-| **Evaluation Dashboard** | Per-query scores, radar charts, baseline vs. enhanced comparison, breakdown by query type |
-| **Run Logs** | Full audit trail of every RAG query with expandable detail view |
+---
 
-### API Endpoints
+## Corpus (20 Sources)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Server health, model info, index status |
-| `POST` | `/query` | Run a RAG query (body: `{"query": "...", "mode": "baseline", "top_k": 5}`) |
-| `GET` | `/corpus` | Corpus manifest, chunking strategy |
-| `GET` | `/evaluation` | Latest eval results + aggregated metrics |
-| `GET` | `/evaluation/queries` | The 20-query evaluation set |
-| `GET` | `/logs?limit=50` | Recent run logs |
-| `GET` | `/logs/{run_id}` | Full detail for a specific run |
+| # | Source ID | Year | Venue | Topic |
+|---|---|---|---|---|
+| 1 | strubell2019 | 2019 | ACL | NLP training energy costs |
+| 2 | luccioni2022 | 2022 | arXiv | BLOOM lifecycle carbon |
+| 3 | patterson2021 | 2021 | arXiv/Google | Training emissions analysis |
+| 4 | schwartz2020 | 2020 | CACM | Green AI vs Red AI |
+| 5 | henderson2020 | 2020 | JMLR | ML energy reporting framework |
+| 6 | luccioni2023 | 2023 | FAccT | Inference energy costs |
+| 7 | bannour2021 | 2021 | EMNLP | Carbon estimation tools |
+| 8 | dodge2022 | 2022 | FAccT | Cloud carbon intensity |
+| 9 | lacoste2019 | 2019 | NeurIPS | ML CO2 calculator |
+| 10 | canziani2016 | 2016 | arXiv | CNN energy benchmarking |
+| 11 | wu2022 | 2022 | MLSys | Meta sustainability |
+| 12 | anthony2020 | 2020 | ICML | Carbontracker tool |
+| 13 | ligozat2022 | 2022 | ACM Surveys | Carbon estimation survey |
+| 14 | desislavov2023 | 2023 | Sustainable Computing | Inference energy trends |
+| 15 | faiz2024 | 2024 | ICLR | LLMCarbon modeling |
+| 16 | lannelongue2021 | 2021 | Advanced Science | Green Algorithms |
+| 17 | samsi2023 | 2023 | IEEE HPEC | LLM inference benchmarks |
+| 18 | garcia_martin2019 | 2019 | JMLR | ML energy estimation |
+| 19 | verdecchia2023 | 2023 | WIREs | Green AI systematic review |
+| 20 | thompson2020 | 2020 | IEEE | Computational limits of DL |
 
-Interactive API docs at `http://localhost:8000/docs` after starting the server.
+All sources are peer-reviewed or published at top-tier venues (ACL, EMNLP, NeurIPS, ICML, FAccT, MLSys, ICLR, IEEE, JMLR, ACM).
 
-## Configuration
+---
 
-All parameters are env-driven via `.env` (see `.env.example`):
+## Security
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_API_KEY` | (required) | Google Gemini API key |
-| `GENERATION_MODEL` | gemini-3-flash-preview | Model for answer generation |
-| `JUDGE_MODEL` | gemini-3-flash-preview | Model for LLM-as-judge evaluation |
-| `GENERATION_TEMPERATURE` | 0.2 | Generation sampling temperature |
-| `JUDGE_TEMPERATURE` | 0.0 | Judge sampling temperature |
-| `MAX_OUTPUT_TOKENS` | 2048 | Max tokens for generation |
-| `JUDGE_MAX_TOKENS` | 300 | Max tokens for judge responses |
-| `DECOMPOSE_TEMPERATURE` | 0.0 | Temperature for query decomposition |
-| `REWRITE_TEMPERATURE` | 0.0 | Temperature for query rewriting |
-| `DECOMPOSE_MAX_TOKENS` | 300 | Max tokens for decomposition |
-| `REWRITE_MAX_TOKENS` | 100 | Max tokens for rewriting |
-| `EMBED_MODEL_NAME` | all-MiniLM-L6-v2 | Sentence-transformer model |
-| `EMBED_BATCH_SIZE` | 32 | Embedding batch size |
-| `CHUNK_SIZE_TOKENS` | 500 | Chunk size in tokens |
-| `CHUNK_OVERLAP_TOKENS` | 100 | Overlap between chunks |
-| `TOP_K` | 5 | Baseline retrieval count |
-| `ENHANCED_TOP_N` | 8 | Enhanced mode merged chunk count |
-| `MAX_SUB_QUERIES` | 4 | Max sub-queries for decomposition |
-| `REQUEST_TIMEOUT` | 30 | PDF download timeout (seconds) |
-| `REQUEST_DELAY_S` | 2 | Delay between downloads (seconds) |
-| `API_HOST` | 0.0.0.0 | FastAPI bind host |
-| `API_PORT` | 8000 | FastAPI bind port |
-| `STREAMLIT_PORT` | 8501 | Streamlit UI port |
-| `CHUNK_PREVIEW_LEN` | 200 | Chunk text preview length |
-| `SCORE_PASS_THRESHOLD` | 3.5 | Score threshold for "pass" label |
-| `SCORE_WARN_THRESHOLD` | 2.5 | Score threshold for "warn" label |
+- **API key isolation**: All keys stored in `.env` (git-ignored). No keys in source code.
+- **Prompt-injection protection**: `src/utils.sanitize_query()` is called at every entry point (RAG pipeline, FastAPI endpoint, Streamlit UI). It strips control characters, enforces a 1000-character limit, and rejects queries matching known injection patterns.
+- **Input validation**: FastAPI uses Pydantic schemas for all request validation.
+- **PDF exclusion**: Downloaded PDFs are git-ignored; re-downloaded at runtime via `make download`.
 
-## Phase 1 Summary
+---
 
-See `report/phase1/` for full deliverables.
+## Evaluation
 
-- **Tasks**: Claim-Evidence Extraction + Cross-Source Synthesis
-- **Models evaluated**: Claude Opus 4.5, Claude Sonnet 4.5, GPT-5, Gemini 3
-- **Key finding**: Structured prompts improve all models by ~30%; citation accuracy requires explicit guardrails
+20 queries (10 direct, 5 synthesis, 5 edge-case) scored on 6 metrics:
 
-## Phase 2: Research-Grade RAG
+| Metric | Type | Scale |
+|---|---|---|
+| Groundedness | LLM-judge | 1-4 |
+| Answer Relevance | LLM-judge | 1-4 |
+| Context Precision | LLM-judge | 1-4 |
+| Citation Precision | Deterministic | 0-1 |
+| Source Recall | Deterministic | 0-1 |
+| Uncertainty Handling | Rule-based | boolean |
 
-### Corpus
-
-15 sources (8 peer-reviewed, 4 technical reports, 2 tool papers, 1 standards report), spanning 2016-2023. Full metadata in `data/data_manifest.csv`.
-
-### Pipeline
-
-1. **Ingest**: PyMuPDF PDF parsing, section-aware chunking (500t/100t overlap), all-MiniLM-L6-v2 embeddings, FAISS IndexFlatIP
-2. **Baseline RAG**: Top-K semantic retrieval + Gemini generation with citation constraints
-3. **Enhanced RAG**: Query rewriting + decomposition for synthesis/multi-hop queries, merged deduplication
-4. **Trust behavior**: Refuses fabricated citations, flags missing evidence, preserves hedging, detects conflicts
-
-### Evaluation (6 metrics)
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| Groundedness | LLM-judge 1-4 | Are claims supported by retrieved chunks? |
-| Answer Relevance | LLM-judge 1-4 | Does the answer address the query? |
-| Context Precision | LLM-judge 1-4 | Are retrieved chunks relevant? |
-| Citation Precision | Deterministic | valid citations / total citations |
-| Source Recall | Deterministic | expected sources found / total expected |
-| Uncertainty Handling | Rule-based | Does answer flag missing evidence? |
-
-20-query set: 10 direct, 5 synthesis/multi-hop, 5 edge-case.
-
-### Enhancement
-
-Query rewriting + decomposition targets synthesis queries. Sub-queries retrieve independently, results are merged and deduplicated before generation.
-
-### Citation Format
-
-`(source_id, chunk_id)` -- each resolves to `data_manifest.csv` and `chunk_store.json`.
-
-## AI Usage Disclosure
-
-| Tool | Purpose | Manual review |
-|------|---------|---------------|
-| Gemini 2.0 Flash | RAG generation + evaluation judging | Prompt engineering, guardrail design |
-| Cursor AI | Code scaffolding | Full code review and testing |
-| sentence-transformers | Embedding | Configuration only |
+Run `make eval-both` then `make report` to generate the full evaluation report.

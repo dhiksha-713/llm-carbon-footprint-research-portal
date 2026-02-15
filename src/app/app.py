@@ -1,28 +1,30 @@
 """FastAPI backend for the LLM Carbon Footprint Research Portal."""
 
-import json
+from __future__ import annotations
+
 import csv
+import json
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
-from google import genai
 
 from src.config import (
-    GENERATION_MODEL, EMBED_MODEL_NAME,
-    PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, DATA_DIR, MANIFEST_PATH,
-    TOP_K, ENHANCED_TOP_N, API_HOST, API_PORT,
+    GENERATION_MODEL, EMBED_MODEL_NAME, LLM_PROVIDER,
+    PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, MANIFEST_PATH,
+    TOP_K, API_HOST, API_PORT,
 )
-from src.rag.rag import load_index, run_rag, _get_client
+from src.llm_client import get_llm_client
+from src.rag.rag import load_index, run_rag
 from src.rag.enhance_query_rewriting import run_enhanced_rag
 from src.eval.evaluation import EVAL_QUERIES, compute_summary
+from src.utils import sanitize_query
 
 
-# ── Shared state loaded once at startup ──────────────────────────────────
+# ── Shared state (loaded once at startup) ─────────────────────────────────
 _state: dict = {}
 
 
@@ -32,7 +34,7 @@ async def lifespan(app: FastAPI):
     _state["index"] = index
     _state["store"] = store
     _state["embed_model"] = SentenceTransformer(EMBED_MODEL_NAME)
-    _state["client"] = _get_client()
+    _state["client"] = get_llm_client()
     yield
     _state.clear()
 
@@ -51,7 +53,7 @@ app.add_middleware(
 )
 
 
-# ── Request / Response schemas ───────────────────────────────────────────
+# ── Schemas ───────────────────────────────────────────────────────────────
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Research question")
     mode: str = Field("baseline", pattern="^(baseline|enhanced)$")
@@ -131,16 +133,18 @@ class LogDetailResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    provider: str
     model: str
     index_loaded: bool
     chunks_count: int
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────
+# ── Endpoints ─────────────────────────────────────────────────────────────
 @app.get("/health", response_model=HealthResponse)
 def health():
     return HealthResponse(
         status="ok",
+        provider=LLM_PROVIDER,
         model=GENERATION_MODEL,
         index_loaded="index" in _state,
         chunks_count=len(_state.get("store", [])),
@@ -152,15 +156,21 @@ def query_rag(req: QueryRequest):
     if not _state:
         raise HTTPException(503, "Models not loaded yet")
 
+    # Sanitize input (raises ValueError on injection)
+    try:
+        clean_query = sanitize_query(req.query)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
     index = _state["index"]
     store = _state["store"]
     embed_model = _state["embed_model"]
     client = _state["client"]
 
     if req.mode == "enhanced":
-        result = run_enhanced_rag(req.query, index, store, embed_model, client)
+        result = run_enhanced_rag(clean_query, index, store, embed_model, client)
     else:
-        result = run_rag(req.query, index, store, embed_model, client,
+        result = run_rag(clean_query, index, store, embed_model, client,
                          top_k=req.top_k, mode=req.mode)
 
     return QueryResponse(
@@ -177,7 +187,7 @@ def query_rag(req: QueryRequest):
 
 @app.get("/corpus", response_model=CorpusResponse)
 def get_corpus():
-    sources = []
+    sources: list[CorpusSource] = []
     if MANIFEST_PATH.exists():
         with open(MANIFEST_PATH, newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
@@ -209,11 +219,7 @@ def get_corpus():
 def get_evaluation():
     files = sorted(OUTPUTS_DIR.glob("eval_results_*.json"))
     if not files:
-        return EvalSummaryResponse(
-            total_queries=len(EVAL_QUERIES),
-            summary={},
-            results=[],
-        )
+        return EvalSummaryResponse(total_queries=len(EVAL_QUERIES), summary={}, results=[])
     results = json.loads(files[-1].read_text(encoding="utf-8"))
     return EvalSummaryResponse(
         total_queries=len(results),
@@ -267,7 +273,7 @@ def get_log_detail(run_id: str):
     raise HTTPException(404, f"Run {run_id} not found")
 
 
-# ── Entry point ──────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("src.app.app:app", host=API_HOST, port=API_PORT, reload=True)

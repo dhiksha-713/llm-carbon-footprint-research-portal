@@ -1,4 +1,4 @@
-"""Centralized configuration. Every tunable parameter lives here, driven by .env."""
+"""Centralized configuration.  Every tunable lives here, driven by .env."""
 
 import os
 from pathlib import Path
@@ -7,59 +7,73 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-# ── Paths ────────────────────────────────────────────────────────────────
-DATA_DIR = PROJECT_ROOT / "data"
-RAW_DIR = DATA_DIR / "raw"
-PROCESSED_DIR = DATA_DIR / "processed"
-MANIFEST_PATH = DATA_DIR / "data_manifest.csv"
-LOGS_DIR = PROJECT_ROOT / "logs"
-OUTPUTS_DIR = PROJECT_ROOT / "outputs"
-REPORT_DIR = PROJECT_ROOT / "report" / "phase2"
+# ── Paths ─────────────────────────────────────────────────────────────────
+DATA_DIR        = PROJECT_ROOT / "data"
+RAW_DIR         = DATA_DIR / "raw"
+PROCESSED_DIR   = DATA_DIR / "processed"
+MANIFEST_PATH   = DATA_DIR / "data_manifest.csv"
+LOGS_DIR        = PROJECT_ROOT / "logs"
+OUTPUTS_DIR     = PROJECT_ROOT / "outputs"
+REPORT_DIR      = PROJECT_ROOT / "report" / "phase2"
 
-for d in [RAW_DIR, PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, REPORT_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+for _d in (RAW_DIR, PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, REPORT_DIR):
+    _d.mkdir(parents=True, exist_ok=True)
 
-# ── Gemini API ───────────────────────────────────────────────────────────
+# ── LLM Provider (feature flag) ──────────────────────────────────────────
+#   "gemini"        → Google Gemini via google-genai
+#   "azure_openai"  → Azure OpenAI via openai SDK
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
+
+# ── Gemini ────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GENERATION_MODEL = os.getenv("GENERATION_MODEL", "gemini-3-flash-preview")
-JUDGE_MODEL = os.getenv("JUDGE_MODEL", "gemini-3-flash-preview")
-GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.2"))
-JUDGE_TEMPERATURE = float(os.getenv("JUDGE_TEMPERATURE", "0.0"))
-MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
-JUDGE_MAX_TOKENS = int(os.getenv("JUDGE_MAX_TOKENS", "300"))
-DECOMPOSE_MAX_TOKENS = int(os.getenv("DECOMPOSE_MAX_TOKENS", "300"))
-REWRITE_MAX_TOKENS = int(os.getenv("REWRITE_MAX_TOKENS", "100"))
-DECOMPOSE_TEMPERATURE = float(os.getenv("DECOMPOSE_TEMPERATURE", "0.0"))
-REWRITE_TEMPERATURE = float(os.getenv("REWRITE_TEMPERATURE", "0.0"))
 
-# ── Embeddings ───────────────────────────────────────────────────────────
+# ── Azure OpenAI ──────────────────────────────────────────────────────────
+AZURE_ENDPOINT    = os.getenv("AZURE_ENDPOINT", "")
+AZURE_API_KEY     = os.getenv("AZURE_API_KEY", "")
+AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-12-01-preview")
+
+# ── Models ────────────────────────────────────────────────────────────────
+#   For Gemini: model names like "gemini-3-flash-preview"
+#   For Azure:  deployment names like "o4-mini"
+GENERATION_MODEL       = os.getenv("GENERATION_MODEL", "gemini-3-flash-preview")
+JUDGE_MODEL            = os.getenv("JUDGE_MODEL", "gemini-3-flash-preview")
+GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.2"))
+JUDGE_TEMPERATURE      = float(os.getenv("JUDGE_TEMPERATURE", "0.0"))
+MAX_OUTPUT_TOKENS      = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
+JUDGE_MAX_TOKENS       = int(os.getenv("JUDGE_MAX_TOKENS", "300"))
+DECOMPOSE_MAX_TOKENS   = int(os.getenv("DECOMPOSE_MAX_TOKENS", "300"))
+REWRITE_MAX_TOKENS     = int(os.getenv("REWRITE_MAX_TOKENS", "100"))
+DECOMPOSE_TEMPERATURE  = float(os.getenv("DECOMPOSE_TEMPERATURE", "0.0"))
+REWRITE_TEMPERATURE    = float(os.getenv("REWRITE_TEMPERATURE", "0.0"))
+
+# ── Embeddings ────────────────────────────────────────────────────────────
 EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "all-MiniLM-L6-v2")
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
 
-# ── Chunking ─────────────────────────────────────────────────────────────
-CHUNK_SIZE_TOKENS = int(os.getenv("CHUNK_SIZE_TOKENS", "500"))
+# ── Chunking ──────────────────────────────────────────────────────────────
+CHUNK_SIZE_TOKENS    = int(os.getenv("CHUNK_SIZE_TOKENS", "500"))
 CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "100"))
-WORDS_PER_TOKEN = float(os.getenv("WORDS_PER_TOKEN", "0.75"))
+WORDS_PER_TOKEN      = float(os.getenv("WORDS_PER_TOKEN", "0.75"))
 
-# ── Retrieval ────────────────────────────────────────────────────────────
-TOP_K = int(os.getenv("TOP_K", "5"))
+# ── Retrieval ─────────────────────────────────────────────────────────────
+TOP_K          = int(os.getenv("TOP_K", "5"))
 ENHANCED_TOP_N = int(os.getenv("ENHANCED_TOP_N", "8"))
 MAX_SUB_QUERIES = int(os.getenv("MAX_SUB_QUERIES", "4"))
 
-# ── Download ─────────────────────────────────────────────────────────────
+# ── Download ──────────────────────────────────────────────────────────────
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 REQUEST_DELAY_S = int(os.getenv("REQUEST_DELAY_S", "2"))
 
-# ── Serving ──────────────────────────────────────────────────────────────
-API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "8000"))
+# ── Serving ───────────────────────────────────────────────────────────────
+API_HOST       = os.getenv("API_HOST", "0.0.0.0")
+API_PORT       = int(os.getenv("API_PORT", "8000"))
 STREAMLIT_PORT = int(os.getenv("STREAMLIT_PORT", "8501"))
 
-# ── Evaluation ───────────────────────────────────────────────────────────
-CHUNK_PREVIEW_LEN = int(os.getenv("CHUNK_PREVIEW_LEN", "200"))
+# ── Evaluation ────────────────────────────────────────────────────────────
+CHUNK_PREVIEW_LEN    = int(os.getenv("CHUNK_PREVIEW_LEN", "200"))
 SCORE_PASS_THRESHOLD = float(os.getenv("SCORE_PASS_THRESHOLD", "3.5"))
 SCORE_WARN_THRESHOLD = float(os.getenv("SCORE_WARN_THRESHOLD", "2.5"))
 
-# ── Prompt Versions ──────────────────────────────────────────────────────
-BASELINE_PROMPT_VERSION = os.getenv("BASELINE_PROMPT_VERSION", "RAG-BASELINE-V2")
-ENHANCED_PROMPT_VERSION = os.getenv("ENHANCED_PROMPT_VERSION", "RAG-ENHANCED-REWRITE-V2")
+# ── Prompt versions ───────────────────────────────────────────────────────
+BASELINE_PROMPT_VERSION  = os.getenv("BASELINE_PROMPT_VERSION", "RAG-BASELINE-V2")
+ENHANCED_PROMPT_VERSION  = os.getenv("ENHANCED_PROMPT_VERSION", "RAG-ENHANCED-REWRITE-V2")

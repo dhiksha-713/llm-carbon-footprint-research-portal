@@ -1,23 +1,23 @@
-"""Evaluation module: 20-query set, LLM-as-judge scoring, metric computation."""
+"""Evaluation: 20-query set, LLM-as-judge scoring, metric computation."""
 
+from __future__ import annotations
+
+import argparse
+import datetime
 import json
 import re
-import datetime
-import argparse
-from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
-from google import genai
-from google.genai import types
 
 from src.config import (
     OUTPUTS_DIR, JUDGE_MODEL, JUDGE_TEMPERATURE,
     EMBED_MODEL_NAME, TOP_K, JUDGE_MAX_TOKENS, CHUNK_PREVIEW_LEN,
     MAX_OUTPUT_TOKENS,
 )
+from src.llm_client import LLMClient, get_llm_client
 
-# ── 20-Query Evaluation Set ─────────────────────────────────────────────
-EVAL_QUERIES = [
+# ── 20-Query Evaluation Set ──────────────────────────────────────────────
+EVAL_QUERIES: list[dict] = [
     {"id": "D01", "type": "direct",
      "query": "What does GPU-hour energy measurement measure, and what are its known failure modes?",
      "expected_sources": ["strubell2019", "patterson2021"]},
@@ -81,25 +81,23 @@ EVAL_QUERIES = [
 ]
 
 
-# ── LLM-as-Judge Scoring ────────────────────────────────────────────────
-def _judge(client: genai.Client, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -> dict:
-    """Call the judge model and parse JSON response."""
-    resp = client.models.generate_content(
+# ── LLM-as-Judge ─────────────────────────────────────────────────────────
+def _judge(client: LLMClient, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -> dict:
+    """Call the judge model and parse the JSON response."""
+    resp = client.generate(
+        prompt,
         model=JUDGE_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=JUDGE_TEMPERATURE,
-            max_output_tokens=max_tokens,
-        ),
+        temperature=JUDGE_TEMPERATURE,
+        max_tokens=max_tokens,
     )
-    text = re.sub(r"```json|```", "", (resp.text or "")).strip()
+    text = re.sub(r"```json|```", "", resp.text).strip()
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return {"score": None, "reasoning": "JSON parse error"}
 
 
-def score_groundedness(answer: str, chunks: list[dict], client: genai.Client) -> dict:
+def score_groundedness(answer: str, chunks: list[dict], client: LLMClient) -> dict:
     ctx = "\n".join(
         f"[{c['source_id']}, {c['chunk_id']}]: "
         f"{c.get('chunk_text_preview', c.get('chunk_text', ''))[:CHUNK_PREVIEW_LEN]}"
@@ -120,7 +118,7 @@ def score_groundedness(answer: str, chunks: list[dict], client: genai.Client) ->
     return result
 
 
-def score_answer_relevance(query: str, answer: str, client: genai.Client) -> dict:
+def score_answer_relevance(query: str, answer: str, client: LLMClient) -> dict:
     prompt = (
         "Does this answer address the research question?\n\n"
         f"QUESTION: {query}\nANSWER: {answer[:MAX_OUTPUT_TOKENS]}\n\n"
@@ -132,8 +130,8 @@ def score_answer_relevance(query: str, answer: str, client: genai.Client) -> dic
     return _judge(client, prompt)
 
 
-def score_context_precision(answer: str, chunks: list[dict], client: genai.Client) -> dict:
-    """Judge whether the retrieved chunks are relevant to the answer produced."""
+def score_context_precision(answer: str, chunks: list[dict], client: LLMClient) -> dict:
+    """Judge whether retrieved chunks are relevant to the answer produced."""
     ctx = "\n".join(
         f"[{c['source_id']}, {c['chunk_id']}]: "
         f"{c.get('chunk_text_preview', c.get('chunk_text', ''))[:CHUNK_PREVIEW_LEN]}"
@@ -150,16 +148,17 @@ def score_context_precision(answer: str, chunks: list[dict], client: genai.Clien
 
 
 def compute_source_recall(retrieved_sources: list[str], expected_sources: list[str]) -> float | None:
-    """Fraction of expected sources that appear in retrieval results."""
+    """Fraction of expected sources found in retrieval results."""
     if not expected_sources:
         return None
-    found = set(retrieved_sources) & set(expected_sources)
-    return len(found) / len(expected_sources)
+    return len(set(retrieved_sources) & set(expected_sources)) / len(expected_sources)
 
 
 def score_uncertainty_handling(answer: str) -> dict:
-    _missing = ["corpus does not contain", "not found in", "no evidence",
-                "not addressed", "cannot find", "not available in", "no specific"]
+    _missing = [
+        "corpus does not contain", "not found in", "no evidence",
+        "not addressed", "cannot find", "not available in", "no specific",
+    ]
     _hedge = ["approximately", "estimated", "may", "suggests", "likely"]
     lower = answer.lower()
     return {
@@ -168,17 +167,17 @@ def score_uncertainty_handling(answer: str) -> dict:
     }
 
 
-# ── Runner ───────────────────────────────────────────────────────────────
+# ── Runner ────────────────────────────────────────────────────────────────
 def run_evaluation(mode: str = "baseline") -> list[dict]:
     from src.rag.rag import load_index, run_rag
     from src.rag.enhance_query_rewriting import run_enhanced_rag
 
     index, store = load_index()
     embed_model = SentenceTransformer(EMBED_MODEL_NAME)
-    client = genai.Client()
+    client = get_llm_client()
 
-    print(f"\nEvaluation — mode={mode.upper()}, queries={len(EVAL_QUERIES)}")
-    results = []
+    print(f"\nEvaluation -- mode={mode.upper()}, queries={len(EVAL_QUERIES)}")
+    results: list[dict] = []
 
     for i, q in enumerate(EVAL_QUERIES, 1):
         print(f"  [{i:02d}/{len(EVAL_QUERIES)}] {q['id']} ({q['type']}): {q['query'][:55]}...")
@@ -188,13 +187,13 @@ def run_evaluation(mode: str = "baseline") -> list[dict]:
         else:
             run_result = run_rag(q["query"], index, store, embed_model, client, mode=mode)
 
-        ground = score_groundedness(run_result["answer"], run_result["retrieved_chunks"], client)
-        relevance = score_answer_relevance(q["query"], run_result["answer"], client)
+        ground   = score_groundedness(run_result["answer"], run_result["retrieved_chunks"], client)
+        rel      = score_answer_relevance(q["query"], run_result["answer"], client)
         ctx_prec = score_context_precision(run_result["answer"], run_result["retrieved_chunks"], client)
-        uncertainty = score_uncertainty_handling(run_result["answer"])
-        cv = run_result["citation_validation"]
-        ret_sources = [c["source_id"] for c in run_result["retrieved_chunks"]]
-        src_recall = compute_source_recall(ret_sources, q["expected_sources"])
+        unc      = score_uncertainty_handling(run_result["answer"])
+        cv       = run_result["citation_validation"]
+        ret_srcs = [c["source_id"] for c in run_result["retrieved_chunks"]]
+        src_rec  = compute_source_recall(ret_srcs, q["expected_sources"])
 
         row = {
             "query_id": q["id"],
@@ -202,23 +201,23 @@ def run_evaluation(mode: str = "baseline") -> list[dict]:
             "query": q["query"],
             "mode": mode,
             "groundedness": ground,
-            "answer_relevance": relevance,
+            "answer_relevance": rel,
             "context_precision": ctx_prec,
-            "uncertainty": uncertainty,
+            "uncertainty": unc,
             "citation_precision": cv.get("citation_precision"),
             "citations_total": cv.get("total_citations"),
             "citations_valid": cv.get("valid_citations"),
-            "source_recall": src_recall,
+            "source_recall": src_rec,
             "answer_preview": run_result["answer"][:CHUNK_PREVIEW_LEN * 2],
-            "retrieved_sources": ret_sources,
+            "retrieved_sources": ret_srcs,
             "expected_sources": q["expected_sources"],
         }
         results.append(row)
 
-        g = ground.get("score", "?")
-        r = relevance.get("score", "?")
+        g  = ground.get("score", "?")
+        r  = rel.get("score", "?")
         cp = f"{cv.get('citation_precision', 0):.2f}" if cv.get("citation_precision") is not None else "N/A"
-        sr = f"{src_recall:.2f}" if src_recall is not None else "N/A"
+        sr = f"{src_rec:.2f}" if src_rec is not None else "N/A"
         print(f"    ground={g}/4 rel={r}/4 cite_p={cp} src_recall={sr}")
 
     ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -233,22 +232,22 @@ def compute_summary(results: list[dict]) -> dict:
         clean = [v for v in vals if v is not None]
         return round(sum(clean) / len(clean), 3) if clean else None
 
-    by_type = {}
+    by_type: dict = {}
     for qt in ("direct", "synthesis", "multihop", "edge_case"):
         sub = [r for r in results if r["query_type"] == qt]
         if sub:
             by_type[qt] = {
                 "count": len(sub),
-                "avg_groundedness": _avg([r["groundedness"].get("score") for r in sub]),
-                "avg_relevance": _avg([r["answer_relevance"].get("score") for r in sub]),
+                "avg_groundedness":  _avg([r["groundedness"].get("score") for r in sub]),
+                "avg_relevance":     _avg([r["answer_relevance"].get("score") for r in sub]),
                 "avg_ctx_precision": _avg([r["context_precision"].get("score") for r in sub]),
                 "avg_cite_precision": _avg([r["citation_precision"] for r in sub]),
                 "avg_source_recall": _avg([r["source_recall"] for r in sub]),
             }
     return {
         "overall": {
-            "avg_groundedness": _avg([r["groundedness"].get("score") for r in results]),
-            "avg_relevance": _avg([r["answer_relevance"].get("score") for r in results]),
+            "avg_groundedness":  _avg([r["groundedness"].get("score") for r in results]),
+            "avg_relevance":     _avg([r["answer_relevance"].get("score") for r in results]),
             "avg_ctx_precision": _avg([r["context_precision"].get("score") for r in results]),
             "avg_cite_precision": _avg([r["citation_precision"] for r in results]),
             "avg_source_recall": _avg([r["source_recall"] for r in results]),
@@ -258,8 +257,9 @@ def compute_summary(results: list[dict]) -> dict:
     }
 
 
+# ── CLI ───────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Evaluation runner")
     parser.add_argument("--mode", choices=["baseline", "enhanced", "both"], default="baseline")
     args = parser.parse_args()
 

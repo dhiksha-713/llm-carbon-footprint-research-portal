@@ -8,7 +8,7 @@ from pathlib import Path
 from src.config import (
     OUTPUTS_DIR, REPORT_DIR, SCORE_PASS_THRESHOLD, SCORE_WARN_THRESHOLD,
     GENERATION_MODEL, EMBED_MODEL_NAME, CHUNK_SIZE_TOKENS,
-    CHUNK_OVERLAP_TOKENS, TOP_K, ENHANCED_TOP_N,
+    CHUNK_OVERLAP_TOKENS, TOP_K, ENHANCED_TOP_N, LLM_PROVIDER,
 )
 
 
@@ -76,7 +76,7 @@ def generate_report() -> Path:
         f"- **Chunking**: Section-aware, {CHUNK_SIZE_TOKENS} tokens, {CHUNK_OVERLAP_TOKENS}-token overlap",
         f"- **Embeddings**: {EMBED_MODEL_NAME}",
         "- **Index**: FAISS IndexFlatIP (cosine similarity)",
-        f"- **Generation**: {GENERATION_MODEL} via google-genai SDK",
+        f"- **Generation**: {GENERATION_MODEL} via {LLM_PROVIDER}",
         f"- **Baseline**: top-{TOP_K} semantic retrieval",
         f"- **Enhanced**: query rewriting + decomposition -> top-{ENHANCED_TOP_N} merged chunks", "", "---", "",
         "## 2. Query Set Design", "",

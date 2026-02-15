@@ -1,16 +1,31 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
 build/
+
+# Virtual environments
 venv/
 .venv/
+
+# IDE
 .vscode/
 .idea/
+.cursor/
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Secrets — NEVER commit
 .env
 *.env
+
+# Downloaded PDFs (re-downloaded at runtime via `make download`)
+data/raw/*.pdf
+
+# Generated artifacts (re-created by pipeline)
 data/processed/
 logs/
 outputs/

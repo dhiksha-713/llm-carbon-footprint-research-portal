@@ -140,33 +140,38 @@ def main() -> None:
     manifest = load_manifest()
     print(f"Loaded {len(manifest)} sources | chunk={CHUNK_SIZE_TOKENS}t overlap={CHUNK_OVERLAP_TOKENS}t")
 
+    # Clear old processed data so every ingest run is fresh
+    for old in PROCESSED_DIR.glob("*"):
+        old.unlink()
+        print(f"  [CLEAN] removed {old.name}")
+
     model = SentenceTransformer(EMBED_MODEL_NAME)
     all_chunks: list[dict] = []
     for row in manifest:
         all_chunks.extend(ingest_source(row, model))
 
     if not all_chunks:
-        print("[ERROR] No chunks produced — ensure PDFs exist in data/raw/")
+        print("[ERROR] No chunks produced -- ensure PDFs exist in data/raw/")
+        print("        Run: make download")
         return
 
     index = build_index(all_chunks)
 
-    store, emb_list = [], []
+    store: list[dict] = []
     for c in all_chunks:
-        emb_list.append(c.pop("embedding"))
+        c.pop("embedding", None)
         store.append(c)
 
     (PROCESSED_DIR / "chunk_store.json").write_text(
         json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    np.save(str(PROCESSED_DIR / "embeddings.npy"), np.array(emb_list, dtype="float32"))
     faiss.write_index(index, str(PROCESSED_DIR / "faiss_index.bin"))
 
     strategy = {
         "chunk_size_tokens": CHUNK_SIZE_TOKENS,
         "chunk_overlap_tokens": CHUNK_OVERLAP_TOKENS,
         "embed_model": EMBED_MODEL_NAME,
-        "embed_dim": len(emb_list[0]),
+        "embed_dim": index.d,
         "section_aware": True,
         "total_chunks": len(store),
         "total_sources": len(manifest),
@@ -175,7 +180,7 @@ def main() -> None:
     (PROCESSED_DIR / "chunking_strategy.json").write_text(
         json.dumps(strategy, indent=2), encoding="utf-8"
     )
-    print(f"Indexed {len(store)} chunks from {strategy['sources_ingested']} sources")
+    print(f"\nIndexed {len(store)} chunks from {strategy['sources_ingested']} sources")
 
 
 if __name__ == "__main__":

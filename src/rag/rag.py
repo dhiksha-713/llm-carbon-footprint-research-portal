@@ -1,23 +1,26 @@
-"""Baseline RAG engine: semantic retrieval + Gemini generation + citation validation + logging."""
+"""Baseline RAG: semantic retrieval, LLM generation, citation validation, logging."""
+
+from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import re
-import datetime
 from pathlib import Path
 
-import numpy as np
 import faiss
+import numpy as np
 from sentence_transformers import SentenceTransformer
-from google import genai
-from google.genai import types
 
 from src.config import (
     PROCESSED_DIR, LOGS_DIR, TOP_K, EMBED_MODEL_NAME,
     GENERATION_MODEL, GENERATION_TEMPERATURE,
     MAX_OUTPUT_TOKENS, BASELINE_PROMPT_VERSION, CHUNK_PREVIEW_LEN,
 )
+from src.llm_client import LLMClient, get_llm_client
+from src.utils import sanitize_query
 
+# ── Constants ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = (
     "You are a research assistant for a systematic review on LLM carbon footprints.\n\n"
     "RULES:\n"
@@ -33,14 +36,15 @@ SYSTEM_PROMPT = (
 _CITE_RE = re.compile(r"\((\w+\d{4}(?:_\w+)?),\s*(chunk_\d+)\)")
 
 
-# ── Index & Store ────────────────────────────────────────────────────────
-def load_index():
+# ── Index / Store ─────────────────────────────────────────────────────────
+def load_index() -> tuple[faiss.Index, list[dict]]:
+    """Load FAISS index and chunk store from disk."""
     index = faiss.read_index(str(PROCESSED_DIR / "faiss_index.bin"))
     store = json.loads((PROCESSED_DIR / "chunk_store.json").read_text(encoding="utf-8"))
     return index, store
 
 
-# ── Retrieval ────────────────────────────────────────────────────────────
+# ── Retrieval ─────────────────────────────────────────────────────────────
 def retrieve(
     query: str,
     index: faiss.Index,
@@ -48,10 +52,11 @@ def retrieve(
     embed_model: SentenceTransformer,
     top_k: int = TOP_K,
 ) -> list[dict]:
+    """Embed *query*, search FAISS, return top-k chunks with scores."""
     q_emb = embed_model.encode([query], show_progress_bar=False).astype("float32")
     q_emb /= np.linalg.norm(q_emb) + 1e-10
     scores, idxs = index.search(q_emb, top_k)
-    results = []
+    results: list[dict] = []
     for score, idx in zip(scores[0], idxs[0]):
         if idx < 0:
             continue
@@ -61,12 +66,12 @@ def retrieve(
     return results
 
 
-# ── Prompt ───────────────────────────────────────────────────────────────
+# ── Prompt ────────────────────────────────────────────────────────────────
 def _build_context(chunks: list[dict]) -> str:
-    blocks = []
+    blocks: list[str] = []
     for i, c in enumerate(chunks):
         blocks.append(
-            f"--- CHUNK {i+1} ---\n"
+            f"--- CHUNK {i + 1} ---\n"
             f"source_id: {c['source_id']}\nchunk_id: {c['chunk_id']}\n"
             f"title: {c['title']}\nauthors: {c['authors']} ({c['year']})\n"
             f"section: {c['section_header']}\nscore: {c['retrieval_score']:.4f}\n\n"
@@ -84,36 +89,29 @@ def _build_user_prompt(query: str, chunks: list[dict]) -> str:
     )
 
 
-# ── Generation ───────────────────────────────────────────────────────────
-def _get_client() -> genai.Client:
-    return genai.Client()
-
-
-def generate_answer(query: str, chunks: list[dict], client: genai.Client) -> dict:
-    response = client.models.generate_content(
+# ── Generation ────────────────────────────────────────────────────────────
+def generate_answer(query: str, chunks: list[dict], client: LLMClient) -> dict:
+    """Generate an answer via the configured LLM provider."""
+    resp = client.generate(
+        _build_user_prompt(query, chunks),
+        system=SYSTEM_PROMPT,
         model=GENERATION_MODEL,
-        contents=_build_user_prompt(query, chunks),
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            temperature=GENERATION_TEMPERATURE,
-            max_output_tokens=MAX_OUTPUT_TOKENS,
-        ),
+        temperature=GENERATION_TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
-    text = response.text or ""
-    cites = [{"source_id": s, "chunk_id": c} for s, c in _CITE_RE.findall(text)]
-    usage = response.usage_metadata
+    cites = [{"source_id": s, "chunk_id": c} for s, c in _CITE_RE.findall(resp.text)]
     return {
-        "answer": text,
+        "answer": resp.text,
         "citations_extracted": cites,
-        "input_tokens": getattr(usage, "prompt_token_count", 0),
-        "output_tokens": getattr(usage, "candidates_token_count", 0),
+        "input_tokens": resp.input_tokens,
+        "output_tokens": resp.output_tokens,
     }
 
 
-# ── Citation Validation ──────────────────────────────────────────────────
+# ── Citation validation ──────────────────────────────────────────────────
 def validate_citations(citations: list[dict], chunks: list[dict]) -> dict:
     retrieved = {(c["source_id"], c["chunk_id"]) for c in chunks}
-    valid = [c for c in citations if (c["source_id"], c["chunk_id"]) in retrieved]
+    valid   = [c for c in citations if (c["source_id"], c["chunk_id"]) in retrieved]
     invalid = [c for c in citations if (c["source_id"], c["chunk_id"]) not in retrieved]
     total = len(citations)
     return {
@@ -125,23 +123,25 @@ def validate_citations(citations: list[dict], chunks: list[dict]) -> dict:
     }
 
 
-# ── Logging ──────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────
 def save_log(entry: dict) -> None:
     path = LOGS_DIR / "rag_runs.jsonl"
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-# ── Pipeline ─────────────────────────────────────────────────────────────
+# ── Pipeline ──────────────────────────────────────────────────────────────
 def run_rag(
     query: str,
     index: faiss.Index,
     store: list[dict],
     embed_model: SentenceTransformer,
-    client: genai.Client,
+    client: LLMClient,
     top_k: int = TOP_K,
     mode: str = "baseline",
 ) -> dict:
+    """End-to-end baseline RAG: sanitize → retrieve → generate → validate → log."""
+    query = sanitize_query(query)
     ts = datetime.datetime.utcnow().isoformat() + "Z"
     chunks = retrieve(query, index, store, embed_model, top_k)
     gen = generate_answer(query, chunks, client)
@@ -175,20 +175,21 @@ def run_rag(
     return entry
 
 
-# ── CLI helpers ──────────────────────────────────────────────────────────
+# ── CLI ───────────────────────────────────────────────────────────────────
 def print_result(result: dict) -> None:
-    print(f"\n{'='*70}\nQUERY: {result['query']}\n{'='*70}")
+    print(f"\n{'=' * 70}\nQUERY: {result['query']}\n{'=' * 70}")
     for c in result["retrieved_chunks"]:
         print(f"  [{c['source_id']}, {c['chunk_id']}] score={c['retrieval_score']:.4f}")
-    print(f"\n{result['answer']}\n{'-'*70}")
+    print(f"\n{result['answer']}\n{'-' * 70}")
     cv = result["citation_validation"]
-    print(f"Citations: {cv['valid_citations']}/{cv['total_citations']} valid | precision={cv['citation_precision']}")
+    print(f"Citations: {cv['valid_citations']}/{cv['total_citations']} "
+          f"valid | precision={cv['citation_precision']}")
     if cv["invalid_list"]:
         print(f"  Invalid: {cv['invalid_list']}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Baseline RAG CLI")
     parser.add_argument("--query", type=str)
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--top_k", type=int, default=TOP_K)
@@ -196,7 +197,7 @@ def main() -> None:
 
     index, store = load_index()
     embed_model = SentenceTransformer(EMBED_MODEL_NAME)
-    client = _get_client()
+    client = get_llm_client()
 
     if args.query:
         print_result(run_rag(args.query, index, store, embed_model, client, args.top_k))
