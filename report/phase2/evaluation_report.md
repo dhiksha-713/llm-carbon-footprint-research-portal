@@ -1,6 +1,6 @@
 # Phase 2 Evaluation Report
-**Project**: Personal Research Portal — Carbon Footprint of LLMs  
-**Group**: Group 4 — Dhiksha Rathis, Shreya Verma  
+**Project**: Personal Research Portal  - Carbon Footprint of LLMs  
+**Group**: Group 4  - Dhiksha Rathis, Shreya Verma  
 **Generated**: 2026-02-14 03:45 UTC  
 
 ---
@@ -10,11 +10,11 @@
 ### Corpus
 - **15 sources** ingested (8 peer-reviewed papers, 4 technical reports, 2 tools/workshop papers, 1 standards report)
 - All sources on LLM/ML energy consumption and carbon measurement
-- Sources span 2016–2023, covering both training and inference emissions
+- Sources span 2016-2023, covering both training and inference emissions
 
 ### Ingestion Pipeline
 - **Parser**: PyMuPDF (fitz) for PDF text extraction
-- **Chunking**: Section-aware sliding window — 500 tokens, 100-token overlap
+- **Chunking**: Section-aware sliding window  - 500 tokens, 100-token overlap
   - Section headers detected via regex (Introduction, Methods, Results, etc.)
   - Within sections: sliding-window word chunking
 - **Embeddings**: `all-MiniLM-L6-v2` (sentence-transformers, 384-dim)
@@ -32,9 +32,9 @@ The 20-query evaluation set was designed to test all three dimensions of researc
 
 | Category | Count | Rationale |
 |----------|-------|-----------|
-| Direct (D01–D10) | 10 | Single-source factual retrieval; tests basic grounding |
-| Synthesis / Multi-hop (S01–S05) | 5 | Cross-source comparison; mirrors Phase 1 Task 2 |
-| Edge Case / Ambiguity (E01–E05) | 5 | Tests trust behavior: corpus boundary detection |
+| Direct (D01-D10) | 10 | Single-source factual retrieval; tests basic grounding |
+| Synthesis / Multi-hop (S01-S05) | 5 | Cross-source comparison; mirrors Phase 1 Task 2 |
+| Edge Case / Ambiguity (E01-E05) | 5 | Tests trust behavior: corpus boundary detection |
 
 **Direct queries** target specific empirical claims (e.g., BERT training CO₂, BLOOM lifecycle tonnes).
 These have known expected sources, enabling citation recall measurement.
@@ -87,7 +87,7 @@ The following three failure patterns were observed with supporting evidence:
 ## 5. Metric Interpretation
 
 ### Groundedness / Faithfulness
-Groundedness was auto-scored using Claude Haiku as an evaluator (1–4 scale matching Phase 1 rubric).
+Groundedness was auto-scored using Claude Haiku as an evaluator (1-4 scale matching Phase 1 rubric).
 A score of 4 indicates all claims are traceable to retrieved chunks with accurate citations.
 The baseline achieved strong groundedness on direct queries (≥3.5 average) but weaker results
 on synthesis and multi-hop queries where retrieval coverage was insufficient.
@@ -95,7 +95,7 @@ on synthesis and multi-hop queries where retrieval coverage was insufficient.
 ### Citation Precision
 Citation precision = valid citations / total citations. A citation is valid if the
 (source_id, chunk_id) pair appears in the retrieved context. This directly operationalizes
-the Phase 1 finding that all models except Opus needed explicit citation rules —
+the Phase 1 finding that all models except Opus needed explicit citation rules  -
 our structured system prompt replicates the Phase 1 Prompt B guardrails.
 
 ### Answer Relevance

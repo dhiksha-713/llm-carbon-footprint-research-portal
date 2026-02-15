@@ -18,7 +18,7 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Secrets — NEVER commit
+# Secrets - NEVER commit
 .env
 *.env
 

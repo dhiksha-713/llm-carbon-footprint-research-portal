@@ -87,7 +87,7 @@ def ingest_source(row: dict, model: SentenceTransformer) -> list[dict]:
     """Parse, chunk, and embed a single source."""
     pdf_path = PROJECT_ROOT / row["raw_path"]
     if not pdf_path.exists():
-        print(f"  [SKIP] {row['source_id']} — PDF not found")
+        print(f"  [SKIP] {row['source_id']} - PDF not found")
         return []
 
     pages = extract_text(pdf_path)
