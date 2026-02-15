@@ -7,11 +7,9 @@ Supports **multi-provider LLM comparison** (Google Gemini and Azure OpenAI).
 
 ---
 
-## Quick Start
+## Quick Start for Mac/ Linux
 
-```bash
-
-Mac / Linux Setup
+```bash 
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
@@ -30,8 +28,14 @@ make download && make ingest
 # Launch UI
 make ui
 # http://localhost:8501
+```
 
-Windows Setup
+---
+
+## Quick Start for Windows 
+
+```bash 
+
 # Create virtual environment
 python -m venv venv
 venv\Scripts\activate
