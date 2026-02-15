@@ -1,61 +1,40 @@
-"""Provider-agnostic LLM client.
-
-Supports Gemini and Azure OpenAI via the LLM_PROVIDER feature flag.
-All RAG/eval code calls through this abstraction -- never directly to a
-specific SDK.
-"""
+"""Provider-agnostic LLM client abstraction."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 
-# ── Response ──────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class LLMResponse:
-    """Unified response from any LLM provider."""
-
     text: str
     input_tokens: int
     output_tokens: int
 
 
-# ── Base ──────────────────────────────────────────────────────────────────
 class LLMClient:
-    """Abstract base.  Subclasses implement ``generate``."""
+    """Abstract base. Subclasses implement ``generate``."""
 
     provider: str = "base"
 
     def generate(
-        self,
-        prompt: str,
-        *,
-        system: str = "",
-        model: str | None = None,
-        temperature: float | None = None,
+        self, prompt: str, *, system: str = "",
+        model: str | None = None, temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
         raise NotImplementedError
 
 
-# ── Gemini ────────────────────────────────────────────────────────────────
 class GeminiClient(LLMClient):
-    """Google Gemini via ``google-genai`` SDK."""
-
     provider = "gemini"
 
     def __init__(self) -> None:
-        from google import genai  # lazy so Azure-only installs skip this
-
+        from google import genai
         self._client = genai.Client()
 
     def generate(
-        self,
-        prompt: str,
-        *,
-        system: str = "",
-        model: str | None = None,
-        temperature: float | None = None,
+        self, prompt: str, *, system: str = "",
+        model: str | None = None, temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
         from google.genai import types
@@ -70,24 +49,20 @@ class GeminiClient(LLMClient):
                 max_output_tokens=max_tokens or MAX_OUTPUT_TOKENS,
             ),
         )
-        usage = resp.usage_metadata
+        u = resp.usage_metadata
         return LLMResponse(
             text=resp.text or "",
-            input_tokens=getattr(usage, "prompt_token_count", 0),
-            output_tokens=getattr(usage, "candidates_token_count", 0),
+            input_tokens=getattr(u, "prompt_token_count", 0),
+            output_tokens=getattr(u, "candidates_token_count", 0),
         )
 
 
-# ── Azure OpenAI ──────────────────────────────────────────────────────────
 class AzureOpenAIClient(LLMClient):
-    """Azure OpenAI via ``openai`` SDK."""
-
     provider = "azure_openai"
 
     def __init__(self) -> None:
         from openai import AzureOpenAI
         from src.config import AZURE_ENDPOINT, AZURE_API_KEY, AZURE_API_VERSION
-
         self._client = AzureOpenAI(
             api_version=AZURE_API_VERSION,
             azure_endpoint=AZURE_ENDPOINT,
@@ -95,54 +70,42 @@ class AzureOpenAIClient(LLMClient):
         )
 
     def generate(
-        self,
-        prompt: str,
-        *,
-        system: str = "",
-        model: str | None = None,
-        temperature: float | None = None,
+        self, prompt: str, *, system: str = "",
+        model: str | None = None, temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
         from src.config import AZURE_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
 
-        deployment = model or AZURE_MODEL
+        deploy = model or AZURE_MODEL
         temp = temperature if temperature is not None else GENERATION_TEMPERATURE
         tokens = max_tokens or MAX_OUTPUT_TOKENS
 
-        messages: list[dict[str, str]] = []
+        msgs: list[dict[str, str]] = []
         if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+            msgs.append({"role": "system", "content": system})
+        msgs.append({"role": "user", "content": prompt})
 
-        # o-series reasoning models use max_completion_tokens and ignore temperature
-        is_reasoning = deployment.startswith("o")
-        kwargs: dict = {"model": deployment, "messages": messages}
-        if is_reasoning:
+        kwargs: dict = {"model": deploy, "messages": msgs}
+        if deploy.startswith("o"):
             kwargs["max_completion_tokens"] = tokens
         else:
             kwargs["temperature"] = temp
             kwargs["max_tokens"] = tokens
 
         resp = self._client.chat.completions.create(**kwargs)
-        choice = resp.choices[0]
-        usage = resp.usage
+        u = resp.usage
         return LLMResponse(
-            text=choice.message.content or "",
-            input_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
-            output_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+            text=resp.choices[0].message.content or "",
+            input_tokens=getattr(u, "prompt_tokens", 0) if u else 0,
+            output_tokens=getattr(u, "completion_tokens", 0) if u else 0,
         )
 
 
-# ── Factory ───────────────────────────────────────────────────────────────
 def get_llm_client() -> LLMClient:
-    """Return the correct client based on ``LLM_PROVIDER`` in config."""
+    """Factory: return the correct client based on LLM_PROVIDER."""
     from src.config import LLM_PROVIDER
-
     if LLM_PROVIDER == "azure_openai":
         return AzureOpenAIClient()
     if LLM_PROVIDER == "gemini":
         return GeminiClient()
-    raise ValueError(
-        f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}. "
-        "Set to 'gemini' or 'azure_openai' in .env"
-    )
+    raise ValueError(f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}")
