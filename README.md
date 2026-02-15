@@ -10,21 +10,47 @@ Supports **multi-provider LLM comparison** (Google Gemini and Azure OpenAI).
 ## Quick Start
 
 ```bash
-# 1. Setup
-git clone <repo-url> && cd llm-carbon-footprint-research-portal
-python3 -m venv venv && source venv/bin/activate
 
-# 2. Install
+Mac / Linux Setup
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
 make install
+# (or: pip install -r requirements.txt)
 
-# 3. Configure (edit .env with your API keys)
+# Configure (edit .env with your API keys)
 cp .env.example .env
 
-# 4. Download + ingest corpus
+# Download + ingest corpus
 make download && make ingest
+# (or: python -m src.ingest.download_sources && python -m src.ingest.ingest)
 
-# 5. Launch UI
-make ui          # http://localhost:8501
+# Launch UI
+make ui
+# http://localhost:8501
+
+Windows Setup
+# Create virtual environment
+python -m venv venv
+venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure (edit .env with your API keys)
+copy .env.example .env
+
+# Download + ingest corpus
+python -m src.ingest.download_sources
+python -m src.ingest.ingest
+
+# Launch UI
+streamlit run src/app/streamlit_ui.py --server.port 8501
+# http://localhost:8501
+
+
 ```
 
 ---
