@@ -22,10 +22,11 @@ Thumbs.db
 .env
 *.env
 
-# Downloaded PDFs (re-downloaded at runtime via `make download`)
+# Downloaded PDFs (re-downloaded via `make download`)
 data/raw/*.pdf
 
 # Generated artifacts (re-created by pipeline)
 data/processed/
 logs/
 outputs/
+report/phase2/

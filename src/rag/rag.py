@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import logging
 
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
+
+log = logging.getLogger(__name__)
 
 from src.config import (
     PROCESSED_DIR, LOGS_DIR, TOP_K, EMBED_MODEL_NAME,
@@ -32,8 +35,10 @@ SYSTEM_PROMPT = (
 
 
 def load_index() -> tuple[faiss.Index, list[dict]]:
+    log.info("Loading FAISS index from %s", PROCESSED_DIR)
     index = faiss.read_index(str(PROCESSED_DIR / "faiss_index.bin"))
     store = json.loads((PROCESSED_DIR / "chunk_store.json").read_text(encoding="utf-8"))
+    log.info("Index loaded: %d vectors, %d chunks", index.ntotal, len(store))
     return index, store
 
 
@@ -51,6 +56,10 @@ def retrieve(
         chunk = store[idx].copy()
         chunk["retrieval_score"] = float(score)
         results.append(chunk)
+    log.info("retrieve top_k=%d -> %d chunks (scores %.4f..%.4f)",
+             top_k, len(results),
+             results[0]["retrieval_score"] if results else 0,
+             results[-1]["retrieval_score"] if results else 0)
     return results
 
 
@@ -79,6 +88,7 @@ def generate_answer(query: str, chunks: list[dict], client: LLMClient) -> dict:
         temperature=GENERATION_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS,
     )
     cites = [{"source_id": s, "chunk_id": c} for s, c in CITE_RE.findall(resp.text)]
+    log.info("generate_answer -> %d citations extracted, answer_len=%d", len(cites), len(resp.text))
     return {"answer": resp.text, "citations_extracted": cites,
             "input_tokens": resp.input_tokens, "output_tokens": resp.output_tokens}
 
@@ -94,10 +104,13 @@ def run_rag(
     top_k: int = TOP_K, mode: str = "baseline",
 ) -> dict:
     query = sanitize_query(query)
+    log.info("run_rag mode=%s top_k=%d query='%s'", mode, top_k, query[:80])
     ts = datetime.datetime.utcnow().isoformat() + "Z"
     chunks = retrieve(query, index, store, embed_model, top_k)
     gen = generate_answer(query, chunks, client)
     cv = validate_citations(gen["citations_extracted"], chunks)
+    log.info("run_rag -> %d/%d valid citations, precision=%s",
+             cv["valid_citations"], cv["total_citations"], cv["citation_precision"])
 
     entry = {
         "run_id": f"{ts}_{hash(query) % 100000:05d}",

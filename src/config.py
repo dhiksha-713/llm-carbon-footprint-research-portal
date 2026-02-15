@@ -1,8 +1,15 @@
 """Centralized configuration. Every tunable lives here, driven by .env."""
 
+import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")

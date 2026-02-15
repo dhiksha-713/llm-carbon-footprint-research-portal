@@ -5,9 +5,12 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import logging
 import re
 
 from sentence_transformers import SentenceTransformer
+
+log = logging.getLogger(__name__)
 
 from src.config import (
     OUTPUTS_DIR, JUDGE_TEMPERATURE, EMBED_MODEL_NAME, TOP_K,
@@ -46,11 +49,14 @@ EVAL_QUERIES: list[dict] = [
 def _judge(client: LLMClient, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -> dict:
     resp = client.generate(prompt, temperature=JUDGE_TEMPERATURE, max_tokens=max_tokens)
     raw = resp.text or ""
+    log.debug("_judge raw response (%d chars): %s", len(raw), raw[:300])
     text = re.sub(r"```(?:json)?\s*", "", raw).strip()
 
     # 1. Direct JSON parse
     try:
-        return json.loads(text)
+        result = json.loads(text)
+        log.info("_judge -> score=%s (direct JSON)", result.get("score"))
+        return result
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -58,20 +64,25 @@ def _judge(client: LLMClient, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -
     m = re.search(r"\{[^{}]*['\"]score['\"].*?\}", text, re.DOTALL)
     if m:
         try:
-            return json.loads(m.group())
+            result = json.loads(m.group())
+            log.info("_judge -> score=%s (extracted JSON object)", result.get("score"))
+            return result
         except (json.JSONDecodeError, TypeError):
             pass
 
     # 3. Regex: "score": 3 or 'score': 3 (inside JSON-like text)
     m = re.search(r"""['\"]score['\"]\s*:\s*(\d+)""", text)
     if m:
+        log.info("_judge -> score=%s (regex from partial JSON)", m.group(1))
         return {"score": int(m.group(1)), "reasoning": "Extracted from partial JSON"}
 
     # 4. Plain-text: Score: 3 or score: 3/4 (no JSON at all)
     m = re.search(r"(?i)\bscore\b\s*[:=]\s*(\d)", text)
     if m:
+        log.info("_judge -> score=%s (plain-text regex)", m.group(1))
         return {"score": int(m.group(1)), "reasoning": "Extracted from plain-text response"}
 
+    log.warning("_judge -> FAILED to parse. Raw: %s", raw[:300])
     return {"score": None, "reasoning": f"Unparseable response: {raw[:200]}"}
 
 

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,18 +50,24 @@ class GrokClient(LLMClient):
             msgs.append({"role": "system", "content": system})
         msgs.append({"role": "user", "content": prompt})
 
+        used_model = model or GROK_MODEL
+        log.info("GrokClient.generate model=%s temp=%s max_tokens=%s prompt_len=%d",
+                 used_model, temperature, max_tokens, len(prompt))
         resp = self._client.chat.completions.create(
-            model=model or GROK_MODEL,
+            model=used_model,
             messages=msgs,
             temperature=temperature if temperature is not None else GENERATION_TEMPERATURE,
             max_tokens=max_tokens or MAX_OUTPUT_TOKENS,
         )
         u = resp.usage
-        return LLMResponse(
+        r = LLMResponse(
             text=resp.choices[0].message.content or "",
             input_tokens=getattr(u, "prompt_tokens", 0) if u else 0,
             output_tokens=getattr(u, "completion_tokens", 0) if u else 0,
         )
+        log.info("GrokClient.generate -> %d in / %d out tokens, response_len=%d",
+                 r.input_tokens, r.output_tokens, len(r.text))
+        return r
 
 
 class AzureOpenAIClient(LLMClient):
@@ -98,13 +107,17 @@ class AzureOpenAIClient(LLMClient):
             kwargs["temperature"] = temp
             kwargs["max_tokens"] = tokens
 
+        log.info("AzureOpenAIClient.generate model=%s prompt_len=%d", deploy, len(prompt))
         resp = self._client.chat.completions.create(**kwargs)
         u = resp.usage
-        return LLMResponse(
+        r = LLMResponse(
             text=resp.choices[0].message.content or "",
             input_tokens=getattr(u, "prompt_tokens", 0) if u else 0,
             output_tokens=getattr(u, "completion_tokens", 0) if u else 0,
         )
+        log.info("AzureOpenAIClient.generate -> %d in / %d out tokens, response_len=%d",
+                 r.input_tokens, r.output_tokens, len(r.text))
+        return r
 
 
 def get_llm_client() -> LLMClient:
