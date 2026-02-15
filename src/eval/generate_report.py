@@ -5,7 +5,7 @@ from pathlib import Path
 
 from src.config import (
     OUTPUTS_DIR, REPORT_DIR, SCORE_PASS_THRESHOLD, SCORE_WARN_THRESHOLD,
-    GEMINI_MODEL, AZURE_MODEL, EMBED_MODEL_NAME, CHUNK_SIZE_TOKENS,
+    GROK_MODEL, AZURE_MODEL, EMBED_MODEL_NAME, CHUNK_SIZE_TOKENS,
     CHUNK_OVERLAP_TOKENS, TOP_K, ENHANCED_TOP_N, LLM_PROVIDER,
 )
 from src.utils import safe_avg, load_eval_results
@@ -62,7 +62,7 @@ def generate_report() -> Path:
         f"- **Chunking**: Section-aware, {CHUNK_SIZE_TOKENS} tokens, {CHUNK_OVERLAP_TOKENS}-token overlap",
         f"- **Embeddings**: {EMBED_MODEL_NAME}",
         "- **Index**: FAISS IndexFlatIP (cosine similarity)",
-        f"- **Generation**: Gemini={GEMINI_MODEL}, Azure={AZURE_MODEL} (active: {LLM_PROVIDER})",
+        f"- **Generation**: Grok-3={GROK_MODEL}, Azure={AZURE_MODEL} (active: {LLM_PROVIDER})",
         f"- **Baseline**: top-{TOP_K} semantic retrieval",
         f"- **Enhanced**: query rewriting + decomposition -> top-{ENHANCED_TOP_N} merged chunks",
         "", "---", "",

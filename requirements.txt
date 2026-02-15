@@ -2,7 +2,6 @@ PyMuPDF>=1.25.0
 sentence-transformers>=3.0.0
 torch>=2.3.0
 faiss-cpu>=1.8.0
-google-genai>=1.0.0
 openai>=1.40.0
 numpy>=1.26.0
 pandas>=2.2.0

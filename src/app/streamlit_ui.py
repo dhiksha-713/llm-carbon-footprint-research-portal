@@ -17,9 +17,9 @@ import pandas as pd
 
 from src.config import (
     PROJECT_ROOT, PROCESSED_DIR, OUTPUTS_DIR, MANIFEST_PATH,
-    GEMINI_MODEL, AZURE_MODEL, EMBED_MODEL_NAME,
+    GROK_MODEL, AZURE_MODEL, EMBED_MODEL_NAME,
     CHUNK_SIZE_TOKENS, CHUNK_OVERLAP_TOKENS, TOP_K, ENHANCED_TOP_N,
-    REPORT_DIR, LLM_PROVIDER, GEMINI_API_KEY, AZURE_API_KEY, AZURE_ENDPOINT,
+    REPORT_DIR, LLM_PROVIDER, GROK_API_KEY, AZURE_API_KEY, AZURE_ENDPOINT,
 )
 from src.utils import sanitize_query, safe_avg, load_eval_results
 
@@ -39,8 +39,8 @@ def _load_resources():
     return index, store, SentenceTransformer(EMBED_MODEL_NAME)
 
 def _get_client(provider: str):
-    from src.llm_client import GeminiClient, AzureOpenAIClient
-    return AzureOpenAIClient() if provider == "azure_openai" else GeminiClient()
+    from src.llm_client import GrokClient, AzureOpenAIClient
+    return AzureOpenAIClient() if provider == "azure_openai" else GrokClient()
 
 def _run_query(query, index, store, embed_model, client, mode, top_k=TOP_K):
     from src.rag.rag import run_rag
@@ -62,7 +62,7 @@ SAMPLE_QUESTIONS = [
 
 # ── Sidebar ──────────────────────────────────────────────────────────────
 
-gemini_ok = bool(GEMINI_API_KEY)
+grok_ok = bool(GROK_API_KEY)
 azure_ok = bool(AZURE_API_KEY and AZURE_ENDPOINT)
 PAGES = ["Home", "Ask a Question", "Compare Models", "Evaluation", "Demo All Deliverables"]
 
@@ -73,8 +73,8 @@ with st.sidebar:
 
     st.markdown("**LLM Provider**")
     opts, labels = [], {}
-    if gemini_ok:
-        opts.append("gemini"); labels["gemini"] = f"Gemini ({GEMINI_MODEL})"
+    if grok_ok:
+        opts.append("grok"); labels["grok"] = f"Grok-3 ({GROK_MODEL})"
     if azure_ok:
         opts.append("azure_openai"); labels["azure_openai"] = f"Azure ({AZURE_MODEL})"
 
@@ -127,7 +127,7 @@ Phase 2 delivers the complete working system.
 | D5 | Evaluation report | Auto-generated Markdown report with per-query scores and delta analysis | `report/phase2/` |
 | D6 | API backend | FastAPI REST API with 5 endpoints (`/health`, `/query`, `/corpus`, `/evaluation`, `/logs`) | `src/app/app.py` |
 | D7 | Interactive UI | This Streamlit application (5 pages) | `src/app/streamlit_ui.py` |
-| D8 | Model comparison | Side-by-side Gemini vs Azure OpenAI on same query | Compare Models page |
+| D8 | Model comparison | Side-by-side Grok-3 vs Azure OpenAI on same query | Compare Models page |
 | D9 | Security | Input sanitization, prompt-injection detection, API key isolation, PDF exclusion | `src/utils.py` |
 
 Use the **Demo All Deliverables** page (sidebar) to run and verify every deliverable in one click.
@@ -141,9 +141,9 @@ Use the **Demo All Deliverables** page (sidebar) to run and verify every deliver
 2. **Chunk** - Each PDF is parsed with PyMuPDF and split into ~500-token overlapping pieces with section headers preserved.
 3. **Embed + Index** - Every chunk is embedded with `all-MiniLM-L6-v2` and stored in a FAISS inner-product index.
 4. **Retrieve** - Your question is embedded into the same vector space; top-K most similar chunks are returned.
-5. **Generate** - The LLM (Gemini `{gm}` or Azure `{am}`) receives the chunks + strict citation rules and writes a cited answer.
+5. **Generate** - The LLM (Grok-3 `{gm}` or Azure `{am}`) receives the chunks + strict citation rules and writes a cited answer.
 6. **Validate** - Every `(source_id, chunk_id)` citation is checked against the set of actually-retrieved chunks. Invalid citations are flagged.
-    """.format(gm=GEMINI_MODEL, am=AZURE_MODEL))
+    """.format(gm=GROK_MODEL, am=AZURE_MODEL))
 
     st.markdown("---")
 
@@ -219,15 +219,15 @@ elif page == "Ask a Question":
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# COMPARE MODELS - Same query through Gemini + Azure side-by-side
+# COMPARE MODELS - Same query through Grok-3 + Azure side-by-side
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "Compare Models":
     st.header("Model Comparison")
-    st.caption("Run the same query through both Gemini and Azure OpenAI. "
+    st.caption("Run the same query through both Grok-3 and Azure OpenAI. "
                "Compare latency, citation quality, and token usage side-by-side.")
 
-    if not gemini_ok:
-        st.warning("Gemini not configured.")
+    if not grok_ok:
+        st.warning("Grok-3 not configured.")
     if not azure_ok:
         st.warning("Azure not configured.")
 
@@ -236,7 +236,7 @@ elif page == "Compare Models":
     custom = st.text_input("Or custom:", key="cc")
     qtr = custom.strip() or comp_q
 
-    if st.button("Run Comparison", type="primary", disabled=(not gemini_ok or not azure_ok)):
+    if st.button("Run Comparison", type="primary", disabled=(not grok_ok or not azure_ok)):
         try:
             qtr = sanitize_query(qtr)
         except ValueError as e:
@@ -246,7 +246,7 @@ elif page == "Compare Models":
         st.markdown(f"**Query:** {qtr} | **Mode:** {comp_mode}")
         st.markdown("---")
 
-        from src.llm_client import GeminiClient, AzureOpenAIClient
+        from src.llm_client import GrokClient, AzureOpenAIClient
 
         def _run_prov(name, cls):
             try:
@@ -257,10 +257,10 @@ elif page == "Compare Models":
 
         cg, ca = st.columns(2)
         with cg:
-            st.subheader(f"Gemini ({GEMINI_MODEL})")
+            st.subheader(f"Grok-3 ({GROK_MODEL})")
             with st.status("Running...") as sg:
-                gr, gt = _run_prov("Gemini", GeminiClient)
-                sg.update(label=f"Gemini ({gt:.1f}s)" if gt else "Failed", state="complete" if gr else "error")
+                gr, gt = _run_prov("Grok-3", GrokClient)
+                sg.update(label=f"Grok-3 ({gt:.1f}s)" if gt else "Failed", state="complete" if gr else "error")
             if gr:
                 st.markdown(gr["answer"][:500] + ("..." if len(gr["answer"]) > 500 else ""))
                 gcv = gr["citation_validation"]
@@ -282,13 +282,13 @@ elif page == "Compare Models":
             st.markdown("---")
             gcv, acv = gr["citation_validation"], ar["citation_validation"]
             st.dataframe(pd.DataFrame([
-                {"Metric": "Latency (s)", "Gemini": f"{gt:.1f}", "Azure": f"{at:.1f}",
-                 "Winner": "Gemini" if gt < at else "Azure"},
-                {"Metric": "Valid Citations", "Gemini": str(gcv["valid_citations"]),
+                {"Metric": "Latency (s)", "Grok-3": f"{gt:.1f}", "Azure": f"{at:.1f}",
+                 "Winner": "Grok-3" if gt < at else "Azure"},
+                {"Metric": "Valid Citations", "Grok-3": str(gcv["valid_citations"]),
                  "Azure": str(acv["valid_citations"]),
-                 "Winner": "Gemini" if gcv["valid_citations"] > acv["valid_citations"] else
+                 "Winner": "Grok-3" if gcv["valid_citations"] > acv["valid_citations"] else
                            "Azure" if acv["valid_citations"] > gcv["valid_citations"] else "Tie"},
-                {"Metric": "Output Tokens", "Gemini": str(gr["tokens"].get("output", 0)),
+                {"Metric": "Output Tokens", "Grok-3": str(gr["tokens"].get("output", 0)),
                  "Azure": str(ar["tokens"].get("output", 0)), "Winner": "-"},
             ]), width="stretch", hide_index=True)
 
@@ -348,7 +348,7 @@ elif page == "Demo All Deliverables":
     if not chosen:
         st.error("No LLM provider configured."); st.stop()
 
-    both = gemini_ok and azure_ok
+    both = grok_ok and azure_ok
     st.info(f"Active: **{labels[chosen]}**. "
             + ("Both providers ready - comparison included." if both else "One provider - comparison skipped."))
 
@@ -403,7 +403,7 @@ elif page == "Demo All Deliverables":
 
         if both:
             with st.status("D8: Model comparison...", expanded=True) as s:
-                from src.llm_client import GeminiClient, AzureOpenAIClient
+                from src.llm_client import GrokClient, AzureOpenAIClient
                 cq = "What tools exist for tracking carbon emissions during ML training?"
                 def _try(cls):
                     try:
@@ -411,12 +411,12 @@ elif page == "Demo All Deliverables":
                         return run_rag(cq, index, store, embed_model, cls(), mode="baseline"), time.time() - t0
                     except Exception as exc:
                         st.warning(str(exc)); return None, None
-                g_r, g_t = _try(GeminiClient)
+                g_r, g_t = _try(GrokClient)
                 a_r, a_t = _try(AzureOpenAIClient)
                 if g_r and a_r:
                     st.dataframe(pd.DataFrame([
-                        {"": "Latency", "Gemini": f"{g_t:.1f}s", "Azure": f"{a_t:.1f}s"},
-                        {"": "Citations", "Gemini": str(g_r["citation_validation"]["valid_citations"]),
+                        {"": "Latency", "Grok-3": f"{g_t:.1f}s", "Azure": f"{a_t:.1f}s"},
+                        {"": "Citations", "Grok-3": str(g_r["citation_validation"]["valid_citations"]),
                          "Azure": str(a_r["citation_validation"]["valid_citations"])},
                     ]), width="stretch", hide_index=True)
                 s.update(label="D8: Comparison done", state="complete")
@@ -467,7 +467,7 @@ elif page == "Demo All Deliverables":
 
         with st.status("D7: AI usage disclosure...", expanded=True) as s:
             st.dataframe(pd.DataFrame([
-                {"Tool": f"Gemini ({GEMINI_MODEL})", "Purpose": "RAG generation + eval judge"},
+                {"Tool": f"Grok-3 ({GROK_MODEL})", "Purpose": "RAG generation + eval judge"},
                 {"Tool": f"Azure ({AZURE_MODEL})", "Purpose": "RAG generation + comparison"},
                 {"Tool": "Cursor AI", "Purpose": "Code scaffolding"},
                 {"Tool": f"sentence-transformers ({EMBED_MODEL_NAME})", "Purpose": "Embeddings"},

@@ -1,7 +1,7 @@
 # LLM Carbon Footprint Research Portal
 
 A research-grade RAG system for systematic review of carbon emissions in Large Language Models.
-Supports **multi-provider LLM comparison** (Google Gemini and Azure OpenAI).
+Supports **multi-provider LLM comparison** (Grok-3 via CMU LLM API and Azure OpenAI).
 
 **Course**: AI Model Development (95-864) | **Group 4**: Dhiksha Rathis, Shreya Verma | CMU Spring 2026
 
@@ -45,26 +45,27 @@ your questions using only those sources. Every claim is cited; every citation is
 2. **Chunk** - Section-aware splitting (~500 tokens, 100-token overlap)
 3. **Index** - Embedded with `all-MiniLM-L6-v2`, stored in FAISS
 4. **Ask** - Your question is embedded; top-K similar chunks retrieved
-5. **Answer** - LLM (Gemini or Azure) writes a cited answer from retrieved chunks
+5. **Answer** - LLM (Grok-3 or Azure OpenAI) writes a cited answer from retrieved chunks
 6. **Verify** - Every citation validated against what was actually retrieved
 
 ---
 
 ## LLM Providers
 
-| Provider | Model | Token Limits |
+| Provider | Model | Endpoint |
 |---|---|---|
-| Google Gemini | `gemini-2.0-flash-lite` | 1M input / 8K output |
-| Azure OpenAI | `o4-mini` | ~100K context |
+| Grok-3 (CMU LLM API) | `grok-3` | OpenAI-compatible `https://cmu-llm-api-resource.services.ai.azure.com/openai/v1/` |
+| Azure OpenAI | `o4-mini` | Azure OpenAI service |
 
 Switch providers dynamically in the Streamlit sidebar. The **Compare Models** page runs both simultaneously.
 
 ### .env configuration
 
 ```env
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=your_key
-GEMINI_MODEL=gemini-2.0-flash-lite
+LLM_PROVIDER=grok
+GROK_API_KEY=your_key
+GROK_ENDPOINT=https://cmu-llm-api-resource.services.ai.azure.com/openai/v1/
+GROK_MODEL=grok-3
 AZURE_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_API_KEY=your_key
 AZURE_MODEL=o4-mini
@@ -105,7 +106,7 @@ User Query -> [Sanitize] -> [Classify] -> [Retrieve (FAISS)]
 ```
 src/
   config.py                 # All constants, env-driven
-  llm_client.py             # Provider-agnostic LLM abstraction
+  llm_client.py             # Provider-agnostic LLM abstraction (GrokClient, AzureOpenAIClient)
   utils.py                  # Sanitization, shared helpers (CITE_RE, build_chunk_context, safe_avg)
   ingest/
     download_sources.py     # PDF downloader

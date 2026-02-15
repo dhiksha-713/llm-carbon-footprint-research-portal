@@ -25,39 +25,45 @@ class LLMClient:
         raise NotImplementedError
 
 
-class GeminiClient(LLMClient):
-    provider = "gemini"
+class GrokClient(LLMClient):
+    """Grok-3 via CMU LLM API (OpenAI-compatible endpoint)."""
+
+    provider = "grok"
 
     def __init__(self) -> None:
-        from google import genai
-        self._client = genai.Client()
+        from openai import OpenAI
+        from src.config import GROK_ENDPOINT, GROK_API_KEY
+        self._client = OpenAI(base_url=GROK_ENDPOINT, api_key=GROK_API_KEY)
 
     def generate(
         self, prompt: str, *, system: str = "",
         model: str | None = None, temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
-        from google.genai import types
-        from src.config import GEMINI_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
+        from src.config import GROK_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
 
-        resp = self._client.models.generate_content(
-            model=model or GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system or None,
-                temperature=temperature if temperature is not None else GENERATION_TEMPERATURE,
-                max_output_tokens=max_tokens or MAX_OUTPUT_TOKENS,
-            ),
+        msgs: list[dict[str, str]] = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.append({"role": "user", "content": prompt})
+
+        resp = self._client.chat.completions.create(
+            model=model or GROK_MODEL,
+            messages=msgs,
+            temperature=temperature if temperature is not None else GENERATION_TEMPERATURE,
+            max_tokens=max_tokens or MAX_OUTPUT_TOKENS,
         )
-        u = resp.usage_metadata
+        u = resp.usage
         return LLMResponse(
-            text=resp.text or "",
-            input_tokens=getattr(u, "prompt_token_count", 0),
-            output_tokens=getattr(u, "candidates_token_count", 0),
+            text=resp.choices[0].message.content or "",
+            input_tokens=getattr(u, "prompt_tokens", 0) if u else 0,
+            output_tokens=getattr(u, "completion_tokens", 0) if u else 0,
         )
 
 
 class AzureOpenAIClient(LLMClient):
+    """Azure OpenAI (o4-mini)."""
+
     provider = "azure_openai"
 
     def __init__(self) -> None:
@@ -106,6 +112,6 @@ def get_llm_client() -> LLMClient:
     from src.config import LLM_PROVIDER
     if LLM_PROVIDER == "azure_openai":
         return AzureOpenAIClient()
-    if LLM_PROVIDER == "gemini":
-        return GeminiClient()
+    if LLM_PROVIDER == "grok":
+        return GrokClient()
     raise ValueError(f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}")

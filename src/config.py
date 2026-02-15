@@ -20,9 +20,10 @@ for _d in (RAW_DIR, PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, REPORT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ── LLM Provider ─────────────────────────────────────────────────────────
-LLM_PROVIDER      = os.getenv("LLM_PROVIDER", "gemini")
-GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL      = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
+LLM_PROVIDER      = os.getenv("LLM_PROVIDER", "grok")
+GROK_API_KEY      = os.getenv("GROK_API_KEY", "")
+GROK_ENDPOINT     = os.getenv("GROK_ENDPOINT", "https://cmu-llm-api-resource.services.ai.azure.com/openai/v1/")
+GROK_MODEL        = os.getenv("GROK_MODEL", "grok-3")
 AZURE_ENDPOINT    = os.getenv("AZURE_ENDPOINT", "")
 AZURE_API_KEY     = os.getenv("AZURE_API_KEY", "")
 AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-12-01-preview")
