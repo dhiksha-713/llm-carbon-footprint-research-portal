@@ -49,6 +49,9 @@ def _run_query(query, index, store, embed_model, client, mode, top_k=TOP_K):
         return run_enhanced_rag(query, index, store, embed_model, client)
     return run_rag(query, index, store, embed_model, client, top_k=top_k, mode=mode)
 
+def _index_ready() -> bool:
+    return (PROCESSED_DIR / "faiss_index.bin").exists() and (PROCESSED_DIR / "chunk_store.json").exists()
+
 SAMPLE_QUESTIONS = [
     "What are the major sources of carbon emissions in LLM training?",
     "What is the total lifecycle carbon footprint of BLOOM?",
@@ -164,6 +167,9 @@ elif page == "Ask a Question":
                "chunks from 20 papers and generates a cited answer. Input is sanitized.")
     if not chosen:
         st.error("No LLM provider configured."); st.stop()
+    if not _index_ready():
+        st.warning("FAISS index not built yet. Go to **Demo All Deliverables** to run the full pipeline first.")
+        st.stop()
 
     c1, c2 = st.columns(2)
     mode = c1.selectbox("Mode", ["baseline", "enhanced"])
@@ -225,6 +231,9 @@ elif page == "Compare Models":
     st.header("Model Comparison")
     st.caption("Run the same query through both Grok-3 and Azure OpenAI. "
                "Compare latency, citation quality, and token usage side-by-side.")
+    if not _index_ready():
+        st.warning("FAISS index not built yet. Go to **Demo All Deliverables** to run the full pipeline first.")
+        st.stop()
 
     if not grok_ok:
         st.warning("Grok-3 not configured.")
@@ -354,18 +363,27 @@ elif page == "Demo All Deliverables":
 
     if st.button("Run Complete Demo", type="primary"):
 
-        with st.status("D2: Data manifest...", expanded=True) as s:
+        with st.status("D2: Data manifest + PDFs...", expanded=True) as s:
             df = load_manifest()
             if df.empty:
-                st.error("Manifest not found. Run `make download`."); st.stop()
-            pdfs = len(list((PROJECT_ROOT / "data" / "raw").glob("*.pdf"))) if (PROJECT_ROOT / "data" / "raw").exists() else 0
+                st.error("data/data_manifest.csv not found."); st.stop()
+            raw_dir = PROJECT_ROOT / "data" / "raw"
+            pdfs = len(list(raw_dir.glob("*.pdf"))) if raw_dir.exists() else 0
+            if pdfs < len(df):
+                st.write(f"Only {pdfs}/{len(df)} PDFs on disk. Downloading missing PDFs...")
+                from src.ingest.download_sources import main as download_main
+                download_main()
+                pdfs = len(list(raw_dir.glob("*.pdf")))
             st.write(f"**{len(df)} sources**, **{pdfs} PDFs** on disk.")
             s.update(label=f"D2: {len(df)} sources, {pdfs} PDFs", state="complete")
 
-        with st.status("D3: Verifying index...", expanded=True) as s:
+        with st.status("D3: Building / verifying index...", expanded=True) as s:
             sp = PROCESSED_DIR / "chunk_store.json"
             if not (PROCESSED_DIR / "faiss_index.bin").exists() or not sp.exists():
-                st.error("FAISS index missing. Run `make ingest`."); st.stop()
+                st.write("FAISS index not found. Running ingestion pipeline...")
+                from src.ingest.ingest import main as ingest_main
+                ingest_main()
+                _load_resources.clear()
             sd = json.loads(sp.read_text(encoding="utf-8"))
             st.write(f"**{len(sd)} chunks** from **{len({c['source_id'] for c in sd})} sources**.")
             s.update(label=f"D3: {len(sd)} chunks indexed", state="complete")
