@@ -134,7 +134,7 @@ if page == "Overview":
         st.write(f"{len(df)} sources, spanning {int(df['year'].min())}--{int(df['year'].max())}.")
         st.dataframe(
             df[["source_id", "title", "authors", "year", "source_type", "venue", "tags"]],
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )
     else:
         st.warning("Manifest not found. Run `make download` first.")
@@ -172,7 +172,7 @@ elif page == "Run Pipeline":
         "Each step shows exactly what is happening behind the scenes."
     )
 
-    if st.button("Run Full Pipeline", type="primary", use_container_width=True):
+    if st.button("Run Full Pipeline", type="primary", width="stretch"):
 
         # ── Step 1: Corpus manifest ──────────────────────────────────────
         with st.status("Step 1/7: Loading corpus manifest...", expanded=True) as s1:
@@ -185,7 +185,7 @@ elif page == "Run Pipeline":
             st.write(f"Year range: {int(df['year'].min())}--{int(df['year'].max())}")
             st.dataframe(
                 df[["source_id", "title", "year", "source_type"]],
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
             s1.update(label="Step 1/7: Corpus manifest loaded (15 sources)", state="complete")
 
@@ -335,7 +335,7 @@ elif page == "Run Pipeline":
                     "Flags Missing": "yes" if unc["flags_missing_evidence"] else "no",
                 })
 
-            st.dataframe(pd.DataFrame(eval_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(eval_rows), width="stretch", hide_index=True)
 
             g_avg = safe_avg([r["Groundedness"] for r in eval_rows])
             r_avg = safe_avg([r["Relevance"] for r in eval_rows])
@@ -505,7 +505,7 @@ elif page == "Evaluation":
         {"Metric": "Citation Precision", "Type": "Deterministic", "Description": "valid citations / total citations"},
         {"Metric": "Source Recall", "Type": "Deterministic", "Description": "expected sources found / total expected"},
         {"Metric": "Uncertainty Handling", "Type": "Rule-based", "Description": "Does answer flag missing evidence?"},
-    ]), use_container_width=True, hide_index=True)
+    ]), width="stretch", hide_index=True)
 
     # 20-query set
     st.subheader("20-Query Evaluation Set")
@@ -513,7 +513,7 @@ elif page == "Evaluation":
     q_rows = [{"ID": q["id"], "Type": q["type"], "Query": q["query"],
                "Expected Sources": ", ".join(q["expected_sources"]) or "(none)"}
               for q in EVAL_QUERIES]
-    st.dataframe(pd.DataFrame(q_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(q_rows), width="stretch", hide_index=True)
 
     # Results
     st.subheader("Results")
@@ -541,7 +541,7 @@ elif page == "Evaluation":
                     "Src Recall": round(r["source_recall"], 2) if r.get("source_recall") is not None else None,
                     "Missing?": "yes" if r["uncertainty"]["flags_missing_evidence"] else "--",
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
             ground = [r["groundedness"].get("score") for r in results if r["groundedness"].get("score")]
             rel = [r["answer_relevance"].get("score") for r in results if r["answer_relevance"].get("score")]
@@ -574,7 +574,7 @@ elif page == "Evaluation":
                 bv, ev = ba[m], ea[m]
                 delta = round(ev - bv, 3) if bv is not None and ev is not None else None
                 comp.append({"Metric": m, "Baseline": bv, "Enhanced": ev, "Delta": delta})
-            st.dataframe(pd.DataFrame(comp), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(comp), width="stretch", hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -648,7 +648,7 @@ elif page == "Deliverables":
         {"Method": "GET", "Endpoint": "/corpus", "Description": "Corpus manifest"},
         {"Method": "GET", "Endpoint": "/evaluation", "Description": "Eval results + metrics"},
         {"Method": "GET", "Endpoint": "/logs", "Description": "Run logs"},
-    ]), use_container_width=True, hide_index=True)
+    ]), width="stretch", hide_index=True)
     st.caption("Start with: `make serve` -- docs at http://localhost:8000/docs")
 
     st.subheader("D7: Interactive UI")
@@ -670,4 +670,4 @@ elif page == "Deliverables":
         {"Tool": GENERATION_MODEL, "Purpose": "RAG generation + eval judging", "Review": "Prompt engineering, guardrails"},
         {"Tool": "Cursor AI", "Purpose": "Code scaffolding", "Review": "Full code review and testing"},
         {"Tool": "sentence-transformers", "Purpose": "Embeddings", "Review": "Configuration only"},
-    ]), use_container_width=True, hide_index=True)
+    ]), width="stretch", hide_index=True)
