@@ -22,20 +22,20 @@ librarian that quotes every source and never makes things up.
 
 ### How does it work?
 
-1. **Collect** -- 20 academic PDFs about AI carbon footprints are downloaded from arXiv.
-2. **Chunk** -- Each PDF is split into ~500-word overlapping text pieces.
-3. **Index** -- Each piece is embedded into a vector and stored in a FAISS search index.
-4. **Ask** -- You type a question. The system finds the most relevant pieces.
-5. **Answer** -- An LLM (your choice: Gemini or Azure OpenAI) reads the pieces and writes a cited answer.
-6. **Verify** -- Every citation is validated against what was actually retrieved.
+1. **Collect** - 20 academic PDFs about AI carbon footprints are downloaded from arXiv.
+2. **Chunk** - Each PDF is split into ~500-word overlapping text pieces.
+3. **Index** - Each piece is embedded into a vector and stored in a FAISS search index.
+4. **Ask** - You type a question. The system finds the most relevant pieces.
+5. **Answer** - An LLM (your choice: Gemini or Azure OpenAI) reads the pieces and writes a cited answer.
+6. **Verify** - Every citation is validated against what was actually retrieved.
 
 ### Choosing your LLM provider
 
 When you open the Streamlit UI, **pick your provider from the sidebar** before doing anything.
 Both providers are pre-configured:
 
-- **Google Gemini** (`gemini-3-flash-preview`) -- fast, good at following citation rules
-- **Azure OpenAI** (`o4-mini`) -- reasoning-focused model from OpenAI
+- **Google Gemini** (`gemini-2.5-pro`) - 1M input / 65K output token limits
+- **Azure OpenAI** (`o4-mini`) - 100K context window, reasoning-focused model
 
 The **Compare Models** page runs the same query through both simultaneously for side-by-side comparison.
 
@@ -70,14 +70,15 @@ cp .env.example .env
 
 | Variable | Description |
 |---|---|
-| `LLM_PROVIDER` | `gemini` or `azure_openai` (which provider to use by default) |
-| `GEMINI_API_KEY` | Google Gemini API key (needed for Gemini and model comparison) |
-| `AZURE_ENDPOINT` | Azure OpenAI endpoint URL (needed for Azure and model comparison) |
+| `LLM_PROVIDER` | `gemini` or `azure_openai` (default provider for CLI/API) |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `GEMINI_MODEL` | Gemini model name (default: `gemini-2.5-pro`) |
+| `AZURE_ENDPOINT` | Azure OpenAI endpoint URL |
 | `AZURE_API_KEY` | Azure OpenAI API key |
 | `AZURE_API_VERSION` | Azure API version (default: `2024-12-01-preview`) |
-| `GENERATION_MODEL` | Model/deployment name (`gemini-3-flash-preview` or `o4-mini`) |
-| `JUDGE_MODEL` | Judge model for evaluation scoring |
+| `AZURE_MODEL` | Azure deployment name (default: `o4-mini`) |
 
+> **Note**: The Streamlit UI lets you switch providers dynamically via the sidebar - no restart needed.  
 > **Security**: `.env` is in `.gitignore` and is never committed. API keys never appear in source code.
 
 ### 4. Download corpus PDFs
@@ -122,26 +123,43 @@ make report       # Generate evaluation report
 
 ---
 
+## Navigating the Streamlit UI
+
+The UI has 6 pages accessible from the sidebar:
+
+| Page | What it does |
+|---|---|
+| **Home** | Overview of the project, Phase 2 deliverables, corpus details, and provider status |
+| **Run Pipeline** | Executes the full RAG system step-by-step with real-time progress indicators |
+| **Ask a Question** | Chat interface to ask any question, with cited answers from the corpus |
+| **Compare Models** | Run the same query through Gemini and Azure OpenAI side-by-side |
+| **Evaluation** | View the 20-query test set, metric definitions, and scoring results |
+| **Demo All Deliverables** | **One-click button** that runs everything (pipeline, comparison, eval, security check) and shows all D1-D9 deliverables |
+
+The **sidebar** also has a **provider selector** that dynamically switches between Gemini and Azure OpenAI for all pages.
+
+---
+
 ## Architecture
 
 ```
 User Query
     |
     v
-[Input Sanitization] -- prompt-injection protection
+[Input Sanitization] - prompt-injection protection
     |
     v
-[Query Classification] -- direct / synthesis / multihop / edge_case
+[Query Classification] - direct / synthesis / multihop / edge_case
     |
     +-- Baseline: top-K semantic retrieval from FAISS
     |
     +-- Enhanced: query rewriting + decomposition + multi-sub-query retrieval + merge
     |
     v
-[LLM Generation] -- Gemini or Azure OpenAI (configurable via LLM_PROVIDER)
+[LLM Generation] - Gemini or Azure OpenAI (configurable via sidebar / LLM_PROVIDER)
     |
     v
-[Citation Validation] -- verify every (source_id, chunk_id) against retrieved chunks
+[Citation Validation] - verify every (source_id, chunk_id) against retrieved chunks
     |
     v
 [Answer + Reference List]
@@ -168,7 +186,7 @@ llm-carbon-footprint-research-portal/
 │   ├── utils.py              # Input sanitization, prompt-injection protection
 │   ├── ingest/
 │   │   ├── download_sources.py   # PDF downloader (arXiv, ACL Anthology)
-│   │   └── ingest.py             # PDF parse → chunk → embed → FAISS index
+│   │   └── ingest.py             # PDF parse -> chunk -> embed -> FAISS index
 │   ├── rag/
 │   │   ├── rag.py                # Baseline RAG pipeline
 │   │   └── enhance_query_rewriting.py  # Enhanced RAG (rewrite + decompose)
@@ -200,35 +218,41 @@ llm-carbon-footprint-research-portal/
 | `make serve` | `uvicorn src.app.app:app` | Start FastAPI backend |
 | `make ui` | `streamlit run src/app/streamlit_ui.py` | Start Streamlit UI |
 | `make clean` | Remove generated artifacts | Clean processed data, logs, outputs |
-| `make all` | Full pipeline | install → download → ingest → eval → report |
+| `make all` | Full pipeline | install -> download -> ingest -> eval -> report |
 
 ---
 
 ## LLM Provider Configuration
 
-The system supports two LLM providers via a **feature flag** (`LLM_PROVIDER`):
+The system supports two LLM providers. Each provider has its own model name in `.env`:
 
 ### Google Gemini
 
 ```env
-LLM_PROVIDER=gemini
 GEMINI_API_KEY=your_key_here
-GENERATION_MODEL=gemini-3-flash-preview
-JUDGE_MODEL=gemini-3-flash-preview
+GEMINI_MODEL=gemini-2.5-pro
 ```
+
+Token limits: 1,048,576 input / 65,536 output.
 
 ### Azure OpenAI (o4-mini)
 
 ```env
-LLM_PROVIDER=azure_openai
 AZURE_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_API_KEY=your_key_here
 AZURE_API_VERSION=2024-12-01-preview
-GENERATION_MODEL=o4-mini
-JUDGE_MODEL=o4-mini
+AZURE_MODEL=o4-mini
 ```
 
-The **Compare Models** page in the Streamlit UI runs the same query through both providers simultaneously, regardless of which is set as default.
+Token limits: ~100K context window. Uses `max_completion_tokens` (o-series reasoning model).
+
+### How provider selection works
+
+- **CLI / API**: Uses `LLM_PROVIDER` from `.env` to pick the default provider.
+- **Streamlit UI**: The sidebar has a radio button to switch between providers at runtime. This overrides the `.env` default for that session.
+- **Compare Models page**: Always runs both providers regardless of which is selected.
+
+Each LLM client (`GeminiClient`, `AzureOpenAIClient`) automatically uses its own model name from `.env`. No cross-provider model name conflicts.
 
 ---
 

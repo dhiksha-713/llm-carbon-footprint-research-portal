@@ -10,7 +10,7 @@ import re
 from sentence_transformers import SentenceTransformer
 
 from src.config import (
-    OUTPUTS_DIR, JUDGE_MODEL, JUDGE_TEMPERATURE,
+    OUTPUTS_DIR, JUDGE_TEMPERATURE,
     EMBED_MODEL_NAME, TOP_K, JUDGE_MAX_TOKENS, CHUNK_PREVIEW_LEN,
     MAX_OUTPUT_TOKENS,
 )
@@ -86,7 +86,6 @@ def _judge(client: LLMClient, prompt: str, max_tokens: int = JUDGE_MAX_TOKENS) -
     """Call the judge model and parse the JSON response."""
     resp = client.generate(
         prompt,
-        model=JUDGE_MODEL,
         temperature=JUDGE_TEMPERATURE,
         max_tokens=max_tokens,
     )

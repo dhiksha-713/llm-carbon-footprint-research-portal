@@ -9,7 +9,7 @@ import re
 from sentence_transformers import SentenceTransformer
 
 from src.config import (
-    GENERATION_MODEL, GENERATION_TEMPERATURE,
+    GENERATION_TEMPERATURE,
     MAX_OUTPUT_TOKENS, TOP_K, ENHANCED_TOP_N, ENHANCED_PROMPT_VERSION,
     EMBED_MODEL_NAME, DECOMPOSE_TEMPERATURE, DECOMPOSE_MAX_TOKENS,
     REWRITE_TEMPERATURE, REWRITE_MAX_TOKENS, MAX_SUB_QUERIES,
@@ -70,7 +70,6 @@ def decompose_query(query: str, client: LLMClient) -> list[str]:
     resp = client.generate(
         f"Decompose this research query:\n\n{query}",
         system=_DECOMPOSE_INSTRUCTION,
-        model=GENERATION_MODEL,
         temperature=DECOMPOSE_TEMPERATURE,
         max_tokens=DECOMPOSE_MAX_TOKENS,
     )
@@ -89,7 +88,6 @@ def rewrite_query(query: str, client: LLMClient) -> str:
     resp = client.generate(
         query,
         system=_REWRITE_INSTRUCTION,
-        model=GENERATION_MODEL,
         temperature=REWRITE_TEMPERATURE,
         max_tokens=REWRITE_MAX_TOKENS,
     )
@@ -160,7 +158,6 @@ def run_enhanced_rag(
     resp = client.generate(
         _build_synthesis_prompt(query, merged, sub_queries, rewritten),
         system=_SYNTHESIS_INSTRUCTION,
-        model=GENERATION_MODEL,
         temperature=GENERATION_TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
     )

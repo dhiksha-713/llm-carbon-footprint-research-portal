@@ -59,10 +59,10 @@ class GeminiClient(LLMClient):
         max_tokens: int | None = None,
     ) -> LLMResponse:
         from google.genai import types
-        from src.config import GENERATION_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
+        from src.config import GEMINI_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
 
         resp = self._client.models.generate_content(
-            model=model or GENERATION_MODEL,
+            model=model or GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system or None,
@@ -103,9 +103,9 @@ class AzureOpenAIClient(LLMClient):
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
-        from src.config import GENERATION_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
+        from src.config import AZURE_MODEL, GENERATION_TEMPERATURE, MAX_OUTPUT_TOKENS
 
-        deployment = model or GENERATION_MODEL
+        deployment = model or AZURE_MODEL
         temp = temperature if temperature is not None else GENERATION_TEMPERATURE
         tokens = max_tokens or MAX_OUTPUT_TOKENS
 

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
 from src.config import (
-    GENERATION_MODEL, EMBED_MODEL_NAME, LLM_PROVIDER,
+    GEMINI_MODEL, AZURE_MODEL, EMBED_MODEL_NAME, LLM_PROVIDER,
     PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, MANIFEST_PATH,
     TOP_K, API_HOST, API_PORT,
 )
@@ -145,7 +145,7 @@ def health():
     return HealthResponse(
         status="ok",
         provider=LLM_PROVIDER,
-        model=GENERATION_MODEL,
+        model=GEMINI_MODEL if LLM_PROVIDER == "gemini" else AZURE_MODEL,
         index_loaded="index" in _state,
         chunks_count=len(_state.get("store", [])),
     )

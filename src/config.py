@@ -20,23 +20,21 @@ for _d in (RAW_DIR, PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, REPORT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ── LLM Provider (feature flag) ──────────────────────────────────────────
-#   "gemini"        → Google Gemini via google-genai
-#   "azure_openai"  → Azure OpenAI via openai SDK
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 
 # ── Gemini ────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 
 # ── Azure OpenAI ──────────────────────────────────────────────────────────
 AZURE_ENDPOINT    = os.getenv("AZURE_ENDPOINT", "")
 AZURE_API_KEY     = os.getenv("AZURE_API_KEY", "")
 AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-12-01-preview")
+AZURE_MODEL       = os.getenv("AZURE_MODEL", "o4-mini")
 
-# ── Models ────────────────────────────────────────────────────────────────
-#   For Gemini: model names like "gemini-3-flash-preview"
-#   For Azure:  deployment names like "o4-mini"
-GENERATION_MODEL       = os.getenv("GENERATION_MODEL", "gemini-3-flash-preview")
-JUDGE_MODEL            = os.getenv("JUDGE_MODEL", "gemini-3-flash-preview")
+# ── Active models (resolved from provider) ────────────────────────────────
+GENERATION_MODEL       = os.getenv("GENERATION_MODEL", GEMINI_MODEL if LLM_PROVIDER == "gemini" else AZURE_MODEL)
+JUDGE_MODEL            = os.getenv("JUDGE_MODEL", GENERATION_MODEL)
 GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.2"))
 JUDGE_TEMPERATURE      = float(os.getenv("JUDGE_TEMPERATURE", "0.0"))
 MAX_OUTPUT_TOKENS      = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
@@ -56,8 +54,8 @@ CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "100"))
 WORDS_PER_TOKEN      = float(os.getenv("WORDS_PER_TOKEN", "0.75"))
 
 # ── Retrieval ─────────────────────────────────────────────────────────────
-TOP_K          = int(os.getenv("TOP_K", "5"))
-ENHANCED_TOP_N = int(os.getenv("ENHANCED_TOP_N", "8"))
+TOP_K           = int(os.getenv("TOP_K", "5"))
+ENHANCED_TOP_N  = int(os.getenv("ENHANCED_TOP_N", "8"))
 MAX_SUB_QUERIES = int(os.getenv("MAX_SUB_QUERIES", "4"))
 
 # ── Download ──────────────────────────────────────────────────────────────
@@ -75,5 +73,5 @@ SCORE_PASS_THRESHOLD = float(os.getenv("SCORE_PASS_THRESHOLD", "3.5"))
 SCORE_WARN_THRESHOLD = float(os.getenv("SCORE_WARN_THRESHOLD", "2.5"))
 
 # ── Prompt versions ───────────────────────────────────────────────────────
-BASELINE_PROMPT_VERSION  = os.getenv("BASELINE_PROMPT_VERSION", "RAG-BASELINE-V2")
-ENHANCED_PROMPT_VERSION  = os.getenv("ENHANCED_PROMPT_VERSION", "RAG-ENHANCED-REWRITE-V2")
+BASELINE_PROMPT_VERSION = os.getenv("BASELINE_PROMPT_VERSION", "RAG-BASELINE-V2")
+ENHANCED_PROMPT_VERSION = os.getenv("ENHANCED_PROMPT_VERSION", "RAG-ENHANCED-REWRITE-V2")

@@ -13,7 +13,7 @@ from sentence_transformers import SentenceTransformer
 
 from src.config import (
     PROCESSED_DIR, LOGS_DIR, TOP_K, EMBED_MODEL_NAME,
-    GENERATION_MODEL, GENERATION_TEMPERATURE,
+    GENERATION_TEMPERATURE,
     MAX_OUTPUT_TOKENS, BASELINE_PROMPT_VERSION, CHUNK_PREVIEW_LEN,
 )
 from src.llm_client import LLMClient, get_llm_client
@@ -94,7 +94,6 @@ def generate_answer(query: str, chunks: list[dict], client: LLMClient) -> dict:
     resp = client.generate(
         _build_user_prompt(query, chunks),
         system=SYSTEM_PROMPT,
-        model=GENERATION_MODEL,
         temperature=GENERATION_TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
     )
