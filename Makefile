@@ -1,4 +1,4 @@
-.PHONY: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean clean-all all help
+.PHONY: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean clean-all clean-threads all help
 
 # Load .env if present (host/port/etc. driven from there)
 -include .env
@@ -19,7 +19,7 @@ API_PORT ?= 8000
 STREAMLIT_PORT ?= 8501
 
 help:
-	@echo "Targets: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean all"
+	@echo "Targets: install download ingest query eval-baseline eval-enhanced eval-both report serve ui clean clean-threads all"
 
 install:
 	$(PIP) install -r requirements.txt
@@ -52,12 +52,16 @@ ui:
 	$(PYTHON) -m streamlit run src/app/streamlit_ui.py --server.port $(STREAMLIT_PORT)
 
 all: install download ingest eval-both report
-	@echo "Done. See report/phase2/evaluation_report.md"
+	@echo "Done. Run 'make ui' to launch the Research Portal."
 
 clean:
-	rm -rf data/processed/ logs/ outputs/ report/phase2/
-	@echo "Cleaned generated artifacts (index, logs, outputs, report)"
+	rm -rf data/processed/ logs/ outputs/ report/phase2/ report/phase3/
+	@echo "Cleaned generated artifacts (index, logs, outputs, reports)"
 
-clean-all: clean
+clean-threads:
+	rm -rf data/threads/
+	@echo "Cleaned all saved research threads"
+
+clean-all: clean clean-threads
 	rm -rf data/raw/*.pdf
 	@echo "Also removed downloaded PDFs - next run will re-download everything"

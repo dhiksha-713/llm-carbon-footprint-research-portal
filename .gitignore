@@ -27,6 +27,8 @@ data/raw/*.pdf
 
 # Generated artifacts (re-created by pipeline)
 data/processed/
+data/threads/
 logs/
 outputs/
 report/phase2/
+report/phase3/

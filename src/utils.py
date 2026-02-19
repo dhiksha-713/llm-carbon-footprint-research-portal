@@ -47,15 +47,21 @@ def sanitize_query(query: str) -> str:
 # ── Chunk formatting (used by both RAG pipelines and evaluation) ─────────
 
 def build_chunk_context(chunks: list[dict]) -> str:
-    """Format a list of retrieved chunks into a prompt-ready context block."""
+    """Format a list of retrieved chunks into a prompt-ready context block.
+
+    Handles both full chunks (from retrieve()) and summarized chunks (from
+    summarize_chunk / saved threads) which use chunk_text_preview.
+    """
     blocks = []
     for i, c in enumerate(chunks):
+        text = c.get("chunk_text") or c.get("chunk_text_preview", "")
+        score = c.get("retrieval_score", 0)
         blocks.append(
             f"--- CHUNK {i + 1} ---\n"
-            f"source_id: {c['source_id']}\nchunk_id: {c['chunk_id']}\n"
-            f"title: {c['title']}\nauthors: {c['authors']} ({c['year']})\n"
-            f"section: {c['section_header']}\nscore: {c['retrieval_score']:.4f}\n\n"
-            f"{c['chunk_text']}"
+            f"source_id: {c.get('source_id', '')}\nchunk_id: {c.get('chunk_id', '')}\n"
+            f"title: {c.get('title', '')}\nauthors: {c.get('authors', '')} ({c.get('year', '')})\n"
+            f"section: {c.get('section_header', '')}\nscore: {score:.4f}\n\n"
+            f"{text}"
         )
     return "\n\n".join(blocks)
 
@@ -99,3 +105,39 @@ def load_eval_results(mode: str) -> list[dict]:
     if not files:
         return []
     return json.loads(Path(files[-1]).read_text(encoding="utf-8"))
+
+
+# ── Trust behavior: suggested next steps when evidence is missing ─────────
+
+_MISSING_PHRASES = [
+    "corpus does not contain", "not found in", "no evidence",
+    "not addressed", "cannot find", "not available in", "no specific",
+    "insufficient evidence", "no direct evidence", "beyond the scope",
+]
+
+
+def suggest_next_steps(answer: str, query: str, retrieved_chunks: list[dict]) -> str | None:
+    """If the answer signals missing evidence, return a suggestion block."""
+    lower = answer.lower()
+    has_gap = any(p in lower for p in _MISSING_PHRASES)
+    if not has_gap:
+        return None
+
+    sources_seen = sorted(set(c.get("source_id", "") for c in retrieved_chunks))
+    suggestions = [
+        "The answer indicates gaps in available evidence. Consider these next steps:",
+        "",
+        "1. **Broaden the query**: Try rephrasing with different terminology or a wider scope.",
+        "2. **Add sources**: Search for recent papers on this specific sub-topic and add them to the corpus.",
+    ]
+    if sources_seen:
+        suggestions.append(
+            f"3. **Deepen existing sources**: The current retrieval drew from "
+            f"{', '.join(sources_seen[:5])}{'...' if len(sources_seen) > 5 else ''}. "
+            f"Check whether these papers have relevant sections not captured by chunking."
+        )
+    suggestions.append(
+        "4. **Try enhanced mode**: If using baseline, switch to enhanced mode for query "
+        "decomposition and multi-source retrieval."
+    )
+    return "\n".join(suggestions)
