@@ -21,9 +21,13 @@ PROCESSED_DIR = DATA_DIR / "processed"
 MANIFEST_PATH = DATA_DIR / "data_manifest.csv"
 LOGS_DIR      = PROJECT_ROOT / "logs"
 OUTPUTS_DIR   = PROJECT_ROOT / "outputs"
+THREADS_DIR   = PROJECT_ROOT / "data" / "threads"
+ARTIFACTS_DIR = PROJECT_ROOT / "outputs" / "artifacts"
 REPORT_DIR    = PROJECT_ROOT / "report" / "phase2"
+REPORT3_DIR   = PROJECT_ROOT / "report" / "phase3"
 
-for _d in (RAW_DIR, PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, REPORT_DIR):
+for _d in (RAW_DIR, PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, REPORT_DIR,
+           REPORT3_DIR, THREADS_DIR, ARTIFACTS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ── LLM Provider ─────────────────────────────────────────────────────────

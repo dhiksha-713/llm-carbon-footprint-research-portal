@@ -99,3 +99,39 @@ def load_eval_results(mode: str) -> list[dict]:
     if not files:
         return []
     return json.loads(Path(files[-1]).read_text(encoding="utf-8"))
+
+
+# ── Trust behavior: suggested next steps when evidence is missing ─────────
+
+_MISSING_PHRASES = [
+    "corpus does not contain", "not found in", "no evidence",
+    "not addressed", "cannot find", "not available in", "no specific",
+    "insufficient evidence", "no direct evidence", "beyond the scope",
+]
+
+
+def suggest_next_steps(answer: str, query: str, retrieved_chunks: list[dict]) -> str | None:
+    """If the answer signals missing evidence, return a suggestion block."""
+    lower = answer.lower()
+    has_gap = any(p in lower for p in _MISSING_PHRASES)
+    if not has_gap:
+        return None
+
+    sources_seen = sorted(set(c.get("source_id", "") for c in retrieved_chunks))
+    suggestions = [
+        "The answer indicates gaps in available evidence. Consider these next steps:",
+        "",
+        "1. **Broaden the query**: Try rephrasing with different terminology or a wider scope.",
+        "2. **Add sources**: Search for recent papers on this specific sub-topic and add them to the corpus.",
+    ]
+    if sources_seen:
+        suggestions.append(
+            f"3. **Deepen existing sources**: The current retrieval drew from "
+            f"{', '.join(sources_seen[:5])}{'...' if len(sources_seen) > 5 else ''}. "
+            f"Check whether these papers have relevant sections not captured by chunking."
+        )
+    suggestions.append(
+        "4. **Try enhanced mode**: If using baseline, switch to enhanced mode for query "
+        "decomposition and multi-source retrieval."
+    )
+    return "\n".join(suggestions)
