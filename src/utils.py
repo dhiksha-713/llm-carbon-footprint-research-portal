@@ -47,15 +47,21 @@ def sanitize_query(query: str) -> str:
 # ── Chunk formatting (used by both RAG pipelines and evaluation) ─────────
 
 def build_chunk_context(chunks: list[dict]) -> str:
-    """Format a list of retrieved chunks into a prompt-ready context block."""
+    """Format a list of retrieved chunks into a prompt-ready context block.
+
+    Handles both full chunks (from retrieve()) and summarized chunks (from
+    summarize_chunk / saved threads) which use chunk_text_preview.
+    """
     blocks = []
     for i, c in enumerate(chunks):
+        text = c.get("chunk_text") or c.get("chunk_text_preview", "")
+        score = c.get("retrieval_score", 0)
         blocks.append(
             f"--- CHUNK {i + 1} ---\n"
-            f"source_id: {c['source_id']}\nchunk_id: {c['chunk_id']}\n"
-            f"title: {c['title']}\nauthors: {c['authors']} ({c['year']})\n"
-            f"section: {c['section_header']}\nscore: {c['retrieval_score']:.4f}\n\n"
-            f"{c['chunk_text']}"
+            f"source_id: {c.get('source_id', '')}\nchunk_id: {c.get('chunk_id', '')}\n"
+            f"title: {c.get('title', '')}\nauthors: {c.get('authors', '')} ({c.get('year', '')})\n"
+            f"section: {c.get('section_header', '')}\nscore: {score:.4f}\n\n"
+            f"{text}"
         )
     return "\n\n".join(blocks)
 
