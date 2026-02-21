@@ -5,16 +5,14 @@ from __future__ import annotations
 import csv
 import datetime
 import io
-import json
 import logging
-import re
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 from src.config import ARTIFACTS_DIR, MANIFEST_PATH
 from src.llm_client import LLMClient
-from src.utils import CITE_RE, build_chunk_context
+from src.utils import CITE_RE, build_chunk_context, extract_json_array
 
 
 def _load_manifest_map() -> dict[str, dict]:
@@ -38,13 +36,14 @@ def _save_artifact(name: str, content: str, ext: str = "md") -> Path:
 _EVIDENCE_TABLE_SYSTEM = (
     "You are a research assistant building an evidence table from academic text. "
     "For each distinct factual claim in the answer, extract one row with these fields:\n"
-    "1. Claim (one sentence)\n"
-    "2. Evidence snippet (direct quote or close paraphrase from the context, ≤50 words)\n"
-    "3. Citation as (source_id, chunk_id)\n"
-    "4. Confidence: HIGH if directly stated, MEDIUM if inferred, LOW if weakly supported\n"
-    "5. Notes (caveats, hedging, or conflicts)\n\n"
-    "Output ONLY a JSON array of objects with keys: claim, evidence, citation, confidence, notes.\n"
-    "Extract 5-15 rows. If a claim lacks support, set confidence=LOW and notes='Not directly supported'."
+    "1. claim — one sentence\n"
+    "2. evidence — direct quote or close paraphrase from the context, ≤50 words\n"
+    "3. citation — as (source_id, chunk_id)\n"
+    "4. confidence — HIGH if directly stated, MEDIUM if inferred, LOW if weakly supported\n"
+    "5. notes — caveats, hedging, or conflicts\n\n"
+    "IMPORTANT: Output ONLY a valid JSON array. No prose, no explanation, no markdown fences.\n"
+    "Example format: [{\"claim\":\"...\",\"evidence\":\"...\",\"citation\":\"...\",\"confidence\":\"HIGH\",\"notes\":\"...\"}]\n"
+    "Extract 3-10 rows. If a claim lacks support, set confidence=LOW and notes='Not directly supported'."
 )
 
 
@@ -59,12 +58,8 @@ def generate_evidence_table(
         "Extract an evidence table (JSON array)."
     )
     resp = client.generate(prompt, system=_EVIDENCE_TABLE_SYSTEM, max_tokens=2000)
-    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip()
-    try:
-        rows = json.loads(text)
-        if not isinstance(rows, list):
-            rows = [rows]
-    except (json.JSONDecodeError, TypeError):
+    rows = extract_json_array(resp.text)
+    if rows is None:
         rows = [{"claim": "Parse error", "evidence": resp.text[:500],
                  "citation": "", "confidence": "LOW", "notes": "Failed to parse LLM output"}]
 
@@ -123,12 +118,8 @@ def generate_annotated_bibliography(
         "Create an annotated bibliography (JSON array)."
     )
     resp = client.generate(prompt, system=_ANNOT_BIB_SYSTEM, max_tokens=3000)
-    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip()
-    try:
-        entries = json.loads(text)
-        if not isinstance(entries, list):
-            entries = [entries]
-    except (json.JSONDecodeError, TypeError):
+    entries = extract_json_array(resp.text)
+    if entries is None:
         entries = [{"source_id": "parse_error", "citation": resp.text[:300],
                     "claim": "", "method": "", "limitations": "", "relevance": ""}]
 

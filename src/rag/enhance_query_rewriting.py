@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import json
 import logging
 import re
 
@@ -18,7 +17,7 @@ from src.config import (
 )
 from src.llm_client import LLMClient, get_llm_client
 from src.rag.rag import retrieve, validate_citations, save_log, load_index, print_result
-from src.utils import sanitize_query, CITE_RE, build_chunk_context, summarize_chunk
+from src.utils import sanitize_query, CITE_RE, build_chunk_context, summarize_chunk, extract_json_array
 
 _DECOMPOSE_INSTRUCTION = (
     "You decompose complex research questions into 2-4 focused sub-queries. "
@@ -34,16 +33,21 @@ _REWRITE_INSTRUCTION = (
 
 _SYNTHESIS_INSTRUCTION = (
     "You are a research synthesis assistant. You MUST use the provided CONTEXT CHUNKS "
-    "to answer the query. The chunks contain real academic text - read them carefully.\n\n"
+    "to answer the query. The chunks contain real academic text — read them carefully.\n\n"
+    "CRITICAL: The context chunks ARE relevant academic content. Extract and synthesize "
+    "information from them. Do NOT say 'no evidence' unless the chunks are truly about "
+    "a completely unrelated topic.\n\n"
     "RULES:\n"
     "1. Read ALL provided context chunks thoroughly before answering.\n"
     "2. Use ONLY information from the provided context chunks.\n"
     "3. Every factual claim MUST have an inline citation: (source_id, chunk_id).\n"
-    "4. Only say 'The corpus does not contain evidence' if the chunks truly have NO relevant information.\n"
+    "4. NEVER say 'The corpus does not contain evidence' when chunks discuss the topic, "
+    "even partially. Instead, summarize what IS available and note any gaps.\n"
     "5. When sources agree, note agreement and cite both.\n"
     "6. When sources disagree, flag: '[CONFLICT: source A says X; source B says Y]'\n"
     "7. Preserve hedging language (approximately, estimated, may).\n"
-    "8. End with a REFERENCE LIST of all cited sources."
+    "8. End with a REFERENCE LIST of all cited sources.\n\n"
+    "Begin your answer directly with the synthesis — no preamble."
 )
 
 _SYNTHESIS_KW = {"compare", "contrast", "difference", "agree", "disagree",
@@ -72,16 +76,15 @@ def decompose_query(query: str, client: LLMClient) -> list[str]:
         temperature=DECOMPOSE_TEMPERATURE, max_tokens=DECOMPOSE_MAX_TOKENS,
     )
     log.debug("decompose raw response: %s", resp.text[:300])
-    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip()
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            subs = [str(q).strip() for q in parsed if str(q).strip()][:MAX_SUB_QUERIES]
-            if subs:
-                log.info("decompose -> %d sub-queries (JSON parse)", len(subs))
-                return subs
-    except (json.JSONDecodeError, TypeError):
-        pass
+
+    parsed = extract_json_array(resp.text)
+    if parsed:
+        subs = [str(q).strip() for q in parsed if isinstance(q, str) and str(q).strip()][:MAX_SUB_QUERIES]
+        if subs:
+            log.info("decompose -> %d sub-queries (JSON parse)", len(subs))
+            return subs
+
+    text = re.sub(r"```(?:json)?\s*", "", resp.text).strip().rstrip("`")
     lines = [ln.strip().strip('"\'- ').rstrip(",") for ln in text.split("\n") if ln.strip()]
     subs = [ln for ln in lines if len(ln) > 10][:MAX_SUB_QUERIES]
     result = subs if subs else [query]

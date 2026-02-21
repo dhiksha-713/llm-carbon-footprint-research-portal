@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import glob
 import json
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 from src.config import CHUNK_PREVIEW_LEN, OUTPUTS_DIR
 
@@ -64,6 +67,45 @@ def build_chunk_context(chunks: list[dict]) -> str:
             f"{text}"
         )
     return "\n\n".join(blocks)
+
+
+def extract_json_array(text: str) -> list[dict] | None:
+    """Robustly extract a JSON array from LLM output.
+
+    Reasoning models (o4-mini) often wrap JSON in prose or markdown fences.
+    This tries multiple strategies before giving up.
+    """
+    cleaned = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`")
+
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            return [parsed]
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group())
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group())
+            if isinstance(parsed, dict):
+                return [parsed]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    log.warning("extract_json_array: could not parse JSON from LLM output (len=%d)", len(text))
+    return None
 
 
 def summarize_chunk(c: dict) -> dict:

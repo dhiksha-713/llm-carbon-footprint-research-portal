@@ -23,6 +23,7 @@ from src.config import (
     AZURE_ENDPOINT, ARTIFACTS_DIR,
 )
 from src.utils import sanitize_query, safe_avg, load_eval_results, suggest_next_steps
+from src.artifacts import artifact_to_pdf
 
 st.set_page_config(
     page_title="LLM Carbon Footprint Research Portal",
@@ -35,6 +36,10 @@ st.markdown("""<style>
     div[data-testid="stMetric"] {
         background: #f8f9fa; border-radius: 8px; padding: 12px 16px;
         border-left: 4px solid #4CAF50;
+    }
+    /* Only constrain long answers inside chat bubbles on the Research page */
+    div[data-testid="stChatMessage"] .stMarkdown {
+        max-height: 60vh; overflow-y: auto;
     }
 </style>""", unsafe_allow_html=True)
 
@@ -64,45 +69,6 @@ def _run_query(query, index, store, embed_model, client, mode, top_k=TOP_K):
 
 def _index_ready() -> bool:
     return (PROCESSED_DIR / "faiss_index.bin").exists() and (PROCESSED_DIR / "chunk_store.json").exists()
-
-def _report_to_pdf(md_text: str) -> bytes:
-    from fpdf import FPDF
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-    pdf.set_font("Helvetica", size=10)
-    for line in md_text.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("# ") and not stripped.startswith("## "):
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.cell(0, 10, stripped[2:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("## "):
-            pdf.set_font("Helvetica", "B", 13)
-            pdf.cell(0, 9, stripped[3:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("### "):
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(0, 8, stripped[4:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("---"):
-            pdf.cell(0, 4, "", new_x="LMARGIN", new_y="NEXT")
-        elif stripped.startswith("|"):
-            pdf.set_font("Courier", size=7)
-            pdf.cell(0, 5, stripped[:130], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("```"):
-            continue
-        elif stripped.startswith(">"):
-            pdf.set_font("Helvetica", "I", 9)
-            pdf.multi_cell(0, 5, stripped.lstrip("> ").replace("**", "").replace("*", ""))
-            pdf.set_font("Helvetica", size=10)
-        elif stripped:
-            pdf.multi_cell(0, 5, stripped.replace("**", "").replace("*", ""))
-        else:
-            pdf.cell(0, 3, "", new_x="LMARGIN", new_y="NEXT")
-    return pdf.output()
-
 
 SAMPLE_QUESTIONS = [
     "What are the major sources of carbon emissions in LLM training?",
@@ -191,7 +157,7 @@ Go to **Demo All Phases** to see the entire system run end-to-end with one click
 elif page == "Demo All Phases":
     st.header("Demo All Phases")
     st.caption("One click runs the entire pipeline from Phase 1 through Phase 3. "
-               "Watch each step execute live.")
+               "Results persist across page reruns (laptop sleep, etc.).")
 
     if not chosen:
         st.error("No LLM provider configured. Add API keys to .env"); st.stop()
@@ -202,7 +168,131 @@ elif page == "Demo All Phases":
 
     fresh = st.checkbox("Fresh start (re-download PDFs, rebuild index, re-run everything)", value=False)
 
-    if st.button("Run Complete Demo", type="primary"):
+    def _render_demo(d: dict):
+        """Display demo results from a saved dict (works for live run AND cache)."""
+
+        # ── Phase 1 ──────────────────────────────────────────────────
+        st.markdown("---")
+        st.subheader("Phase 1 — Research Framing")
+        st.write("**Domain**: Environmental cost of large language model training and inference")
+        st.write("**Main research question**: What is the carbon footprint of training and deploying "
+                 "large language models, and how can it be measured and reduced?")
+        st.write("**Sub-questions**:")
+        st.write("1. What are the major sources of carbon emissions in LLM training?")
+        st.write("2. How do different studies estimate training carbon — where do they agree/disagree?")
+        st.write("3. What is the lifecycle carbon footprint (embodied + operational)?")
+        st.write("4. Does inference energy exceed training energy over a model's lifetime?")
+        st.write("5. What tools exist for tracking and reporting ML carbon emissions?")
+        st.write("6. How have measurement methods evolved from 2019 to 2024?")
+        st.write("")
+        st.write("**Tasks chosen** (Phase 1 task menu):")
+        st.write("- *Claim-evidence extraction*: output Claim | Evidence | Citation rows")
+        st.write("- *Cross-source synthesis*: output Agreement | Disagreement | Supporting evidence")
+        st.write("")
+        st.write("**Models**: Grok-3 (CMU LLM API) and Azure OpenAI (o4-mini)")
+        st.write("**Prompt design**: Baseline (minimal) vs Structured (guardrails + cite chunk_id + say unknown)")
+        mdf = load_manifest()
+        if not mdf.empty:
+            st.write(f"**Corpus**: {len(mdf)} sources selected:")
+            st.dataframe(mdf[["source_id", "title", "year", "source_type"]],
+                         width="stretch", hide_index=True)
+
+        # ── Phase 2 ──────────────────────────────────────────────────
+        st.markdown("---")
+        st.subheader("Phase 2 — RAG Pipeline")
+
+        st.write(f"**Download**: {d['pdfs']}/{d['n_manifest']} PDFs")
+        st.write(f"**Ingest**: {d['n_chunks']} chunks from {d['n_sources']} sources indexed in FAISS")
+        st.write(f"**Embedding**: `{EMBED_MODEL_NAME}` (384-dim) | **LLM**: {d['provider']} | "
+                 f"**FAISS**: {d['n_vectors']} vectors")
+
+        st.markdown("#### Baseline RAG")
+        bcv = d["baseline_cv"]
+        st.write(f"**Query**: {d['baseline_query']}")
+        st.write(f"Retrieved **{d['baseline_n_chunks']} chunks** in {d['baseline_time']:.1f}s — "
+                 f"**Citations**: {bcv['valid_citations']}/{bcv['total_citations']} valid "
+                 f"(precision: {bcv.get('citation_precision', 'N/A')})")
+        with st.expander("Full Baseline Answer"):
+            st.markdown(d["baseline_answer"])
+
+        st.markdown("#### Enhanced RAG")
+        ecv = d["enhanced_cv"]
+        st.write(f"**Query**: {d['enhanced_query']}")
+        st.write(f"Query type: **{d['enhanced_qtype']}** | "
+                 f"Rewritten: {d['enhanced_rewritten']}")
+        if d.get("enhanced_sub_queries"):
+            for sq in d["enhanced_sub_queries"]:
+                st.write(f"  - {sq}")
+        st.write(f"**{d['enhanced_n_chunks']} chunks** merged — "
+                 f"**Citations**: {ecv['valid_citations']}/{ecv['total_citations']} valid")
+        with st.expander("Full Enhanced Answer"):
+            st.markdown(d["enhanced_answer"])
+
+        if d.get("comparison"):
+            st.markdown("#### Model Comparison")
+            st.dataframe(pd.DataFrame(d["comparison"]), width="stretch", hide_index=True)
+        else:
+            st.info("Model comparison skipped (need both API keys in .env).")
+
+        # ── Phase 3 ──────────────────────────────────────────────────
+        st.markdown("---")
+        st.subheader("Phase 3 — Portal Product")
+
+        st.markdown("#### Research Thread")
+        st.write(f"Thread saved: `{d['thread_id']}` — "
+                 f"Total threads: **{d['n_threads']}**")
+        st.write("Each thread preserves: query + retrieved evidence + answer + citation validation")
+
+        st.markdown("#### Evidence Table")
+        st.write(f"**{d['artifact_count']} rows** extracted — Saved to: `{d['artifact_path']}`")
+        st.markdown(d["artifact_md"])
+
+        st.markdown("#### Trust Behavior")
+        st.write(f"**Query**: {d['edge_query']}")
+        edge_cv = d["edge_cv"]
+        st.write(f"**Citations**: {edge_cv['valid_citations']}/{edge_cv['total_citations']}")
+        with st.expander("Answer"):
+            st.markdown(d["edge_answer"])
+        if d.get("edge_next_steps"):
+            st.write("**Evidence gap detected — suggested next steps:**")
+            st.markdown(d["edge_next_steps"])
+        else:
+            st.write("(No evidence gap detected in this answer)")
+
+        st.markdown("#### Evaluation")
+        if d.get("eval_table"):
+            st.dataframe(pd.DataFrame(d["eval_table"]), width="stretch", hide_index=True)
+
+        st.markdown("#### Report")
+        st.write(f"Report: **{d['report_chars']:,} chars** with per-query logs and failure cases.")
+        if d.get("report_text"):
+            st.download_button("Download Evaluation Report", data=d["report_text"],
+                               file_name="evaluation_report.md", mime="text/markdown",
+                               key="demo_report_dl")
+
+        st.markdown("#### Security + AI Disclosure")
+        st.write("**Security**: API keys in `.env` (git-ignored), prompt-injection detection, "
+                 "1000-char limit, control-char strip")
+        st.write("Prompt injection correctly **blocked**")
+        st.write("**AI usage disclosure**:")
+        st.dataframe(pd.DataFrame([
+            {"Tool": f"Grok-3 ({GROK_MODEL})", "Purpose": "RAG generation + eval judge + artifacts"},
+            {"Tool": f"Azure ({AZURE_MODEL})", "Purpose": "RAG generation + comparison"},
+            {"Tool": "Cursor AI", "Purpose": "Code scaffolding"},
+            {"Tool": f"sentence-transformers ({EMBED_MODEL_NAME})", "Purpose": "Embeddings"},
+        ]), width="stretch", hide_index=True)
+
+        st.success("All phases demonstrated end-to-end. Use the sidebar to explore individual features.")
+
+    # ── Run button ────────────────────────────────────────────────────
+    run_col, clear_col = st.columns([3, 1])
+    run_clicked = run_col.button("Run Complete Demo", type="primary")
+    if clear_col.button("Clear cached results"):
+        st.session_state.pop("demo", None)
+        st.rerun()
+
+    if run_clicked:
+        demo: dict = {}
 
         # ── PHASE 1: Research Framing ─────────────────────────────────────
         st.markdown("---")
@@ -218,44 +308,38 @@ elif page == "Demo All Phases":
             st.write("4. Does inference energy exceed training energy over a model's lifetime?")
             st.write("5. What tools exist for tracking and reporting ML carbon emissions?")
             st.write("6. How have measurement methods evolved from 2019 to 2024?")
-
             st.write("")
             st.write("**Tasks chosen** (Phase 1 task menu):")
             st.write("- *Claim-evidence extraction*: output Claim | Evidence | Citation rows")
             st.write("- *Cross-source synthesis*: output Agreement | Disagreement | Supporting evidence")
-
             st.write("")
             st.write("**Models**: Grok-3 (CMU LLM API) and Azure OpenAI (o4-mini)")
             st.write("**Prompt design**: Baseline (minimal) vs Structured (guardrails + cite chunk_id + say unknown)")
-
             df = load_manifest()
             if not df.empty:
                 st.write(f"**Corpus**: {len(df)} sources selected:")
                 st.dataframe(df[["source_id", "title", "year", "source_type"]],
-                             use_container_width=True, hide_index=True)
+                             width="stretch", hide_index=True)
             s.update(label="Phase 1: Research framing complete", state="complete")
 
         # ── PHASE 2: Pipeline ─────────────────────────────────────────────
         st.markdown("---")
         st.subheader("Phase 2 — RAG Pipeline")
 
-        # Step: Clean (optional)
         if fresh:
             with st.status("Cleaning all generated data...", expanded=True) as s:
-                import shutil
                 raw_dir = PROJECT_ROOT / "data" / "raw"
-                for d in [raw_dir, PROCESSED_DIR, PROJECT_ROOT / "logs",
-                          OUTPUTS_DIR, REPORT_DIR]:
-                    if d.exists():
-                        for f in d.glob("*"):
+                for dd in [raw_dir, PROCESSED_DIR, PROJECT_ROOT / "logs",
+                           OUTPUTS_DIR, REPORT_DIR]:
+                    if dd.exists():
+                        for f in dd.glob("*"):
                             if f.is_file():
                                 f.unlink()
-                    d.mkdir(parents=True, exist_ok=True)
+                    dd.mkdir(parents=True, exist_ok=True)
                 _load_resources.clear()
                 st.write("Cleaned all generated artifacts.")
                 s.update(label="Clean slate ready", state="complete")
 
-        # Step: Download PDFs
         with st.status("Downloading and validating PDFs...", expanded=True) as s:
             df = load_manifest()
             if df.empty:
@@ -266,9 +350,10 @@ elif page == "Demo All Phases":
             raw_dir = PROJECT_ROOT / "data" / "raw"
             pdfs = len(list(raw_dir.glob("*.pdf"))) if raw_dir.exists() else 0
             st.write(f"**{pdfs}/{len(df)} PDFs** downloaded and validated.")
+            demo["pdfs"] = pdfs
+            demo["n_manifest"] = len(df)
             s.update(label=f"Download: {pdfs}/{len(df)} PDFs", state="complete")
 
-        # Step: Ingest
         with st.status("Parsing, chunking, embedding, building FAISS index...", expanded=True) as s:
             from src.ingest.ingest import main as ingest_main
             ingest_main()
@@ -276,29 +361,35 @@ elif page == "Demo All Phases":
             sp = PROCESSED_DIR / "chunk_store.json"
             if sp.exists():
                 sd = json.loads(sp.read_text(encoding="utf-8"))
-                n_src = len({c["source_id"] for c in sd})
-                st.write(f"**{len(sd)} chunks** from **{n_src} sources** indexed in FAISS.")
+                demo["n_chunks"] = len(sd)
+                demo["n_sources"] = len({c["source_id"] for c in sd})
+                st.write(f"**{demo['n_chunks']} chunks** from **{demo['n_sources']} sources** indexed in FAISS.")
             else:
                 st.error("Ingestion failed."); st.stop()
-            s.update(label=f"Ingest: {len(sd)} chunks from {n_src} sources", state="complete")
+            s.update(label=f"Ingest: {demo['n_chunks']} chunks from {demo['n_sources']} sources", state="complete")
 
-        # Step: Load resources
         with st.status("Loading embedding model + LLM client...", expanded=True) as s:
             index, store, embed_model = _load_resources()
             client = _get_client(chosen)
+            demo["provider"] = labels[chosen]
+            demo["n_vectors"] = index.ntotal
             st.write(f"Embedding: `{EMBED_MODEL_NAME}` (384-dim) | LLM: **{labels[chosen]}** | "
                      f"FAISS: {index.ntotal} vectors")
             s.update(label="Models loaded", state="complete")
 
-        # Step: Baseline RAG
         bq = "What are the major sources of carbon emissions in LLM training?"
-        with st.status(f"Baseline RAG: \"{bq[:60]}...\"", expanded=True) as s:
+        with st.status(f"Baseline RAG: \"{bq}\"", expanded=True) as s:
             from src.rag.rag import run_rag
             t0 = time.time()
             br = run_rag(bq, index, store, embed_model, client, top_k=TOP_K, mode="baseline")
             bt = time.time() - t0
             bcv = br["citation_validation"]
-            st.write(f"Retrieved **{len(br['retrieved_chunks'])} chunks** in {bt:.1f}s")
+            demo["baseline_query"] = bq
+            demo["baseline_answer"] = br["answer"]
+            demo["baseline_cv"] = bcv
+            demo["baseline_time"] = bt
+            demo["baseline_n_chunks"] = len(br["retrieved_chunks"])
+            st.write(f"Retrieved **{demo['baseline_n_chunks']} chunks** in {bt:.1f}s")
             st.write(f"**Citations**: {bcv['valid_citations']}/{bcv['total_citations']} valid "
                      f"(precision: {bcv.get('citation_precision', 'N/A')})")
             with st.expander("Full Baseline Answer"):
@@ -306,27 +397,33 @@ elif page == "Demo All Phases":
             s.update(label=f"Baseline: {bcv['valid_citations']}/{bcv['total_citations']} cites, {bt:.1f}s",
                      state="complete")
 
-        # Step: Enhanced RAG
-        eq = "Compare Strubell et al. and Patterson et al. on measurement methodology."
-        with st.status(f"Enhanced RAG: \"{eq[:60]}...\"", expanded=True) as s:
+        eq = "How do different studies measure the energy consumption and carbon footprint of training large language models?"
+        with st.status(f"Enhanced RAG: \"{eq}\"", expanded=True) as s:
             from src.rag.enhance_query_rewriting import run_enhanced_rag
             t0 = time.time()
             er = run_enhanced_rag(eq, index, store, embed_model, client)
             et = time.time() - t0
             ecv = er["citation_validation"]
-            st.write(f"Query type: **{er.get('query_type')}** | "
-                     f"Rewritten: {er.get('rewritten_query', 'N/A')}")
-            if er.get("sub_queries"):
-                for sq in er["sub_queries"]:
+            demo["enhanced_query"] = eq
+            demo["enhanced_answer"] = er["answer"]
+            demo["enhanced_cv"] = ecv
+            demo["enhanced_time"] = et
+            demo["enhanced_n_chunks"] = len(er["retrieved_chunks"])
+            demo["enhanced_qtype"] = er.get("query_type", "")
+            demo["enhanced_rewritten"] = er.get("rewritten_query", "N/A")
+            demo["enhanced_sub_queries"] = er.get("sub_queries", [])
+            st.write(f"Query type: **{demo['enhanced_qtype']}** | "
+                     f"Rewritten: {demo['enhanced_rewritten']}")
+            if demo["enhanced_sub_queries"]:
+                for sq in demo["enhanced_sub_queries"]:
                     st.write(f"  - {sq}")
-            st.write(f"**{len(er['retrieved_chunks'])} chunks** merged | "
+            st.write(f"**{demo['enhanced_n_chunks']} chunks** merged | "
                      f"**Citations**: {ecv['valid_citations']}/{ecv['total_citations']} valid")
             with st.expander("Full Enhanced Answer"):
                 st.markdown(er["answer"])
             s.update(label=f"Enhanced: {ecv['valid_citations']}/{ecv['total_citations']} cites, {et:.1f}s",
                      state="complete")
 
-        # Step: Model comparison (if both)
         if both:
             with st.status("Model comparison (Grok-3 vs Azure)...", expanded=True) as s:
                 from src.llm_client import GrokClient, AzureOpenAIClient
@@ -341,12 +438,14 @@ elif page == "Demo All Phases":
                 a_r, a_t = _try(AzureOpenAIClient)
                 if g_r and a_r:
                     gcv, acv = g_r["citation_validation"], a_r["citation_validation"]
-                    st.dataframe(pd.DataFrame([
+                    demo["comparison"] = [
                         {"Metric": "Latency", "Grok-3": f"{g_t:.1f}s", "Azure": f"{a_t:.1f}s"},
                         {"Metric": "Valid Citations",
                          "Grok-3": f"{gcv['valid_citations']}/{gcv['total_citations']}",
                          "Azure": f"{acv['valid_citations']}/{acv['total_citations']}"},
-                    ]), use_container_width=True, hide_index=True)
+                    ]
+                    st.dataframe(pd.DataFrame(demo["comparison"]),
+                                 width="stretch", hide_index=True)
                 s.update(label="Model comparison done", state="complete")
         else:
             st.info("Model comparison skipped (need both API keys in .env).")
@@ -355,7 +454,6 @@ elif page == "Demo All Phases":
         st.markdown("---")
         st.subheader("Phase 3 — Portal Product")
 
-        # Step: Research thread saved
         with st.status("Saving research thread...", expanded=True) as s:
             from src.threads import save_thread, list_threads
             thread = save_thread(
@@ -365,40 +463,44 @@ elif page == "Demo All Phases":
                 provider=labels[chosen],
             )
             all_threads = list_threads()
+            demo["thread_id"] = thread["thread_id"]
+            demo["n_threads"] = len(all_threads)
             st.write(f"Thread saved: `{thread['thread_id']}`")
             st.write(f"Total threads in portal: **{len(all_threads)}**")
             st.write("Each thread preserves: query + retrieved evidence + answer + citation validation")
             s.update(label=f"Thread saved ({len(all_threads)} total)", state="complete")
 
-        # Step: Generate artifact (evidence table)
         with st.status("Generating evidence table artifact...", expanded=True) as s:
             from src.artifacts import generate_evidence_table
             artifact = generate_evidence_table(bq, br["answer"], br["retrieved_chunks"], client)
+            demo["artifact_count"] = artifact["count"]
+            demo["artifact_path"] = artifact["md_path"]
+            demo["artifact_md"] = artifact["markdown"]
             st.write(f"**Evidence table**: {artifact['count']} rows extracted")
             st.write(f"Saved to: `{artifact['md_path']}`")
-            st.markdown(artifact["markdown"][:1500])
-            if len(artifact["markdown"]) > 1500:
-                st.caption("... (truncated)")
+            st.markdown(artifact["markdown"])
             s.update(label=f"Evidence table: {artifact['count']} rows", state="complete")
 
-        # Step: Trust behavior demo
         edge_q = "Does the corpus contain evidence about the carbon footprint of GPT-4?"
-        with st.status(f"Trust behavior: \"{edge_q[:60]}\"", expanded=True) as s:
+        with st.status(f"Trust behavior: \"{edge_q}\"", expanded=True) as s:
             edge_r = run_rag(edge_q, index, store, embed_model, client, mode="baseline")
             edge_cv = edge_r["citation_validation"]
+            ns = suggest_next_steps(edge_r["answer"], edge_q, edge_r["retrieved_chunks"])
+            demo["edge_query"] = edge_q
+            demo["edge_answer"] = edge_r["answer"]
+            demo["edge_cv"] = edge_cv
+            demo["edge_next_steps"] = ns
             st.write(f"**Query**: {edge_q}")
             st.write(f"**Citations**: {edge_cv['valid_citations']}/{edge_cv['total_citations']}")
             with st.expander("Answer"):
                 st.markdown(edge_r["answer"])
-            next_steps = suggest_next_steps(edge_r["answer"], edge_q, edge_r["retrieved_chunks"])
-            if next_steps:
+            if ns:
                 st.write("**Evidence gap detected — suggested next steps:**")
-                st.markdown(next_steps)
+                st.markdown(ns)
             else:
                 st.write("(No evidence gap detected in this answer)")
             s.update(label="Trust behavior demonstrated", state="complete")
 
-        # Step: Evaluation (20 queries)
         with st.status("Running 20-query evaluation (baseline + enhanced)...", expanded=True) as s:
             from src.eval.evaluation import EVAL_QUERIES, run_evaluation, compute_summary
             st.write(f"**{len(EVAL_QUERIES)} queries** x 2 modes. This takes several minutes.")
@@ -408,11 +510,9 @@ elif page == "Demo All Phases":
             st.write("Running **enhanced**...")
             enhanced_results = run_evaluation("enhanced")
             st.write(f"Enhanced done ({len(enhanced_results)} queries).")
-
             bsm = compute_summary(baseline_results)["overall"]
             esm = compute_summary(enhanced_results)["overall"]
-            st.markdown("**Results:**")
-            st.dataframe(pd.DataFrame([
+            demo["eval_table"] = [
                 {"Mode": "Baseline",
                  "Groundedness": f"{bsm['avg_groundedness']}/4",
                  "Relevance": f"{bsm['avg_relevance']}/4",
@@ -421,22 +521,25 @@ elif page == "Demo All Phases":
                  "Groundedness": f"{esm['avg_groundedness']}/4",
                  "Relevance": f"{esm['avg_relevance']}/4",
                  "Cite Precision": str(esm["avg_cite_precision"])},
-            ]), use_container_width=True, hide_index=True)
+            ]
+            st.markdown("**Results:**")
+            st.dataframe(pd.DataFrame(demo["eval_table"]),
+                         width="stretch", hide_index=True)
             s.update(label=f"Evaluation: {len(baseline_results)}+{len(enhanced_results)} queries",
                      state="complete")
 
-        # Step: Generate report
         with st.status("Generating evaluation report...", expanded=True) as s:
             from src.eval.generate_report import generate_report
             rp = generate_report()
             report_text = rp.read_text(encoding="utf-8") if rp.exists() else ""
+            demo["report_text"] = report_text
+            demo["report_chars"] = len(report_text)
             st.write(f"Report: **{len(report_text):,} chars** with per-query logs and failure cases.")
             s.update(label="Report generated", state="complete")
 
-        # Step: Export demonstration
         with st.status("Export options...", expanded=True) as s:
             st.write("All outputs are exportable:")
-            st.write(f"- Research threads: `data/threads/` ({len(all_threads)} saved)")
+            st.write(f"- Research threads: `data/threads/` ({demo['n_threads']} saved)")
             st.write(f"- Artifacts: `outputs/artifacts/` (evidence tables, bibliographies, memos)")
             st.write("- Evaluation report: `report/phase2/evaluation_report.md`")
             st.write("- Run logs: `logs/rag_runs.jsonl`")
@@ -445,7 +548,6 @@ elif page == "Demo All Phases":
                                    file_name="evaluation_report.md", mime="text/markdown")
             s.update(label="Exports ready", state="complete")
 
-        # Step: Security + AI disclosure
         with st.status("Security + AI disclosure...", expanded=True) as s:
             st.write("**Security**: API keys in `.env` (git-ignored), prompt-injection detection, "
                      "1000-char limit, control-char strip")
@@ -461,10 +563,16 @@ elif page == "Demo All Phases":
                 {"Tool": f"Azure ({AZURE_MODEL})", "Purpose": "RAG generation + comparison"},
                 {"Tool": "Cursor AI", "Purpose": "Code scaffolding"},
                 {"Tool": f"sentence-transformers ({EMBED_MODEL_NAME})", "Purpose": "Embeddings"},
-            ]), use_container_width=True, hide_index=True)
+            ]), width="stretch", hide_index=True)
             s.update(label="Security + AI disclosed", state="complete")
 
+        st.session_state["demo"] = demo
         st.success("All phases demonstrated end-to-end. Use the sidebar to explore individual features.")
+
+    elif "demo" in st.session_state:
+        st.caption("Showing cached results from previous run. Click **Run Complete Demo** to re-run, "
+                   "or **Clear cached results** to reset.")
+        _render_demo(st.session_state["demo"])
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -597,7 +705,7 @@ elif page == "Research Threads":
         col_a.download_button("Export Markdown", data=md_export,
                               file_name=f"thread_{selected_id}.md", mime="text/markdown")
         try:
-            col_b.download_button("Export PDF", data=_report_to_pdf(md_export),
+            col_b.download_button("Export PDF", data=artifact_to_pdf(md_export),
                                   file_name=f"thread_{selected_id}.pdf", mime="application/pdf")
         except Exception:
             pass
@@ -670,11 +778,11 @@ elif page == "Artifacts":
             with st.expander(af.name):
                 if af.suffix == ".csv":
                     try:
-                        st.dataframe(pd.read_csv(af), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.read_csv(af), width="stretch", hide_index=True)
                     except Exception:
-                        st.text(af.read_text(encoding="utf-8")[:1000])
+                        st.text(af.read_text(encoding="utf-8"))
                 else:
-                    st.markdown(af.read_text(encoding="utf-8")[:2000])
+                    st.markdown(af.read_text(encoding="utf-8"))
     else:
         st.caption("No artifacts yet. Generate one above.")
 
@@ -699,7 +807,7 @@ elif page == "Corpus Explorer":
 
     st.dataframe(
         filtered[["source_id", "title", "authors", "year", "source_type", "venue"]],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
     selected_source = st.selectbox("View details:", ["(select)"] + filtered["source_id"].tolist())
@@ -723,7 +831,7 @@ elif page == "Corpus Explorer":
                     with st.expander(f"Preview chunks ({len(source_chunks)})"):
                         for c in source_chunks[:8]:
                             st.markdown(f"**{c['chunk_id']}** | {c.get('section_header', '')}")
-                            st.caption(c["chunk_text"][:200] + "...")
+                            st.caption(c["chunk_text"])
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -739,7 +847,7 @@ elif page == "Evaluation":
         {"ID": q["id"], "Type": q["type"], "Query": q["query"][:80],
          "Expected": ", ".join(q["expected_sources"]) or "(none)"}
         for q in EVAL_QUERIES
-    ]), use_container_width=True, hide_index=True)
+    ]), width="stretch", hide_index=True)
 
     st.markdown("---")
 
@@ -755,7 +863,7 @@ elif page == "Evaluation":
             "Relev.": r["answer_relevance"].get("score"),
             "Cite Prec.": round(r["citation_precision"], 2) if r.get("citation_precision") is not None else None,
             "Src Recall": round(r["source_recall"], 2) if r.get("source_recall") is not None else None,
-        } for r in results]), use_container_width=True, hide_index=True)
+        } for r in results]), width="stretch", hide_index=True)
 
         m1, m2, m3 = st.columns(3)
         g = [r["groundedness"].get("score") for r in results if r["groundedness"].get("score")]
@@ -766,12 +874,12 @@ elif page == "Evaluation":
         m3.metric("Avg Cite Precision", f"{safe_avg(cp)}" if cp else "-")
 
         scored = sorted(
-            [(r["groundedness"].get("score") or 0) + (r["answer_relevance"].get("score") or 0), r]
-            for r in results
+            ((r["groundedness"].get("score") or 0) + (r["answer_relevance"].get("score") or 0), i, r)
+            for i, r in enumerate(results)
         )
         if scored:
-            worst = scored[0][1]
-            best = scored[-1][1]
+            worst = scored[0][2]
+            best = scored[-1][2]
             st.markdown(f"**Best**: {best['query_id']} — Ground. {best['groundedness'].get('score')}/4, "
                         f"Relev. {best['answer_relevance'].get('score')}/4")
             st.markdown(f"**Worst**: {worst['query_id']} — Ground. {worst['groundedness'].get('score')}/4, "

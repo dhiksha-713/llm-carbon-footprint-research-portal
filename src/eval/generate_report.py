@@ -4,7 +4,7 @@ import datetime
 from pathlib import Path
 
 from src.config import (
-    OUTPUTS_DIR, REPORT_DIR, SCORE_PASS_THRESHOLD, SCORE_WARN_THRESHOLD,
+    REPORT_DIR, SCORE_PASS_THRESHOLD, SCORE_WARN_THRESHOLD,
     GROK_MODEL, AZURE_MODEL, EMBED_MODEL_NAME, CHUNK_SIZE_TOKENS,
     CHUNK_OVERLAP_TOKENS, TOP_K, ENHANCED_TOP_N, LLM_PROVIDER,
 )
@@ -402,7 +402,6 @@ def generate_report() -> Path:
     path = REPORT_DIR / "evaluation_report.md"
     content = "\n".join(L)
     path.write_text(content, encoding="utf-8")
-    (OUTPUTS_DIR / "evaluation_report.md").write_text(content, encoding="utf-8")
     print(f"Report saved to {path} ({len(content)} chars)")
     return path
 
