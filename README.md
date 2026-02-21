@@ -6,6 +6,8 @@ produces citation-backed answers, generates exportable research artifacts, and l
 
 **Course**: AI Model Development (95-864) | **Group 4**: Dhiksha Rathis, Shreya Verma | CMU Spring 2026
 
+[![Demo Video](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtu.be/Sir30x56_Dk) **[Watch the demo video](https://youtu.be/Sir30x56_Dk)**
+
 ---
 
 ## Quick Start (5 minutes)
