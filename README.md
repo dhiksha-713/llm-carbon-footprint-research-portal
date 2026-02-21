@@ -143,11 +143,13 @@ repo/
   outputs/
     artifacts/                   # Generated research artifacts (git-ignored)
     eval_results_*.json          # Evaluation results (git-ignored)
-  logs/
+    threads and artifacts report.md
+  logs/ 
     rag_runs.jsonl               # Run logs (git-ignored)
   report/
-    phase2/                      # Phase 2 evaluation report
-    phase3/                      # Phase 3 report
+    phase 1/                      # Phase 1 reports 
+    phase 2/                      # Phase 2 evaluation report
+    phase 3/                      # Phase 3 report
 ```
 
 ---
