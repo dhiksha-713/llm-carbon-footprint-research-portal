@@ -23,6 +23,7 @@ from src.config import (
     AZURE_ENDPOINT, ARTIFACTS_DIR,
 )
 from src.utils import sanitize_query, safe_avg, load_eval_results, suggest_next_steps
+from src.artifacts import artifact_to_pdf
 
 st.set_page_config(
     page_title="LLM Carbon Footprint Research Portal",
@@ -31,10 +32,19 @@ st.set_page_config(
 )
 
 st.markdown("""<style>
-    .block-container { padding-top: 1.5rem; }
+    .block-container { padding-top: 1.5rem; max-width: 900px; }
     div[data-testid="stMetric"] {
         background: #f8f9fa; border-radius: 8px; padding: 12px 16px;
         border-left: 4px solid #4CAF50;
+    }
+    div[data-testid="stChatMessage"] .stMarkdown {
+        max-height: 400px; overflow-y: auto;
+    }
+    div[data-testid="stExpander"] div[data-testid="stExpanderDetails"] {
+        max-height: 350px; overflow-y: auto;
+    }
+    div[data-testid="stStatusWidget"] div.stMarkdown {
+        max-height: 300px; overflow-y: auto;
     }
 </style>""", unsafe_allow_html=True)
 
@@ -64,45 +74,6 @@ def _run_query(query, index, store, embed_model, client, mode, top_k=TOP_K):
 
 def _index_ready() -> bool:
     return (PROCESSED_DIR / "faiss_index.bin").exists() and (PROCESSED_DIR / "chunk_store.json").exists()
-
-def _report_to_pdf(md_text: str) -> bytes:
-    from fpdf import FPDF
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-    pdf.set_font("Helvetica", size=10)
-    for line in md_text.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("# ") and not stripped.startswith("## "):
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.cell(0, 10, stripped[2:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("## "):
-            pdf.set_font("Helvetica", "B", 13)
-            pdf.cell(0, 9, stripped[3:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("### "):
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(0, 8, stripped[4:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("---"):
-            pdf.cell(0, 4, "", new_x="LMARGIN", new_y="NEXT")
-        elif stripped.startswith("|"):
-            pdf.set_font("Courier", size=7)
-            pdf.cell(0, 5, stripped[:130], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", size=10)
-        elif stripped.startswith("```"):
-            continue
-        elif stripped.startswith(">"):
-            pdf.set_font("Helvetica", "I", 9)
-            pdf.multi_cell(0, 5, stripped.lstrip("> ").replace("**", "").replace("*", ""))
-            pdf.set_font("Helvetica", size=10)
-        elif stripped:
-            pdf.multi_cell(0, 5, stripped.replace("**", "").replace("*", ""))
-        else:
-            pdf.cell(0, 3, "", new_x="LMARGIN", new_y="NEXT")
-    return pdf.output()
-
 
 SAMPLE_QUESTIONS = [
     "What are the major sources of carbon emissions in LLM training?",
@@ -307,7 +278,7 @@ elif page == "Demo All Phases":
                      state="complete")
 
         # Step: Enhanced RAG
-        eq = "Compare Strubell et al. and Patterson et al. on measurement methodology."
+        eq = "How do different studies measure the energy consumption and carbon footprint of training large language models?"
         with st.status(f"Enhanced RAG: \"{eq[:60]}...\"", expanded=True) as s:
             from src.rag.enhance_query_rewriting import run_enhanced_rag
             t0 = time.time()
@@ -597,7 +568,7 @@ elif page == "Research Threads":
         col_a.download_button("Export Markdown", data=md_export,
                               file_name=f"thread_{selected_id}.md", mime="text/markdown")
         try:
-            col_b.download_button("Export PDF", data=_report_to_pdf(md_export),
+            col_b.download_button("Export PDF", data=artifact_to_pdf(md_export),
                                   file_name=f"thread_{selected_id}.pdf", mime="application/pdf")
         except Exception:
             pass
