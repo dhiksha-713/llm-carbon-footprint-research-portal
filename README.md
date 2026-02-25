@@ -1,7 +1,7 @@
 # LLM Carbon Footprint Research Portal
 
 **Personal Research Portal (PRP)** that helps you move from a research question to a grounded synthesis on the
-environmental cost of large AI models. It ingests 20 peer-reviewed papers, retrieves evidence via semantic search,
+environmental cost of large AI models. It ingests 20 research sources, retrieves evidence via semantic search,
 produces citation-backed answers, generates exportable research artifacts, and logs evaluation results.
 
 **Course**: AI Model Development (95-864) | **Group 4**: Dhiksha Rathis, Shreya Verma | CMU Spring 2026
@@ -146,6 +146,32 @@ Covering: LLM training energy, inference costs, lifecycle carbon analysis, measu
 
 Full metadata in `data/data_manifest.csv` with fields: `source_id`, `title`, `authors`, `year`, `source_type`, `venue`, `url_or_doi`, `raw_path`, `processed_path`, `tags`, `relevance_note`.
 
+### Corpus Selection Methodology (Explicit)
+
+To address reproducibility and grading transparency, source selection was done with a fixed, documented process:
+
+1. **Research scope fixed first**: LLM carbon footprint across training, inference, lifecycle, and measurement methods.
+2. **Candidate pool creation**: papers/reports gathered from well-known venues plus high-signal references from survey papers.
+3. **Inclusion criteria**:
+   - Directly measures, models, or critiques energy/carbon impacts of ML/LLMs.
+   - Provides methodological detail sufficient for evidence extraction.
+   - Has stable source access (PDF and URL/DOI).
+   - Fits the 2016-2024 period to capture method evolution.
+4. **Exclusion criteria**:
+   - Purely opinion/editorial pieces without empirical or methodological evidence.
+   - Duplicates/near-duplicates of the same findings.
+   - Sources with missing metadata or unavailable full text.
+5. **Balance constraints**:
+   - Include both foundational and recent work.
+   - Cover both training and inference emissions.
+   - Include methods/tools papers to support retrieval and evaluation queries.
+6. **Final manifest freeze**:
+   - Final 20 sources stored in `data/data_manifest.csv`.
+   - Raw files reproducibly fetched to `data/raw/` via `make download`.
+   - Each source has a relevance note explaining why it was selected.
+
+Selection mode is **manual curation with scripted download/validation** (not random crawl), which keeps the corpus aligned with the research question while remaining fully reproducible.
+
 ---
 
 ## Research Artifacts
@@ -253,6 +279,10 @@ AZURE_API_KEY=<your-key>
 AZURE_ENDPOINT=https://<resource>.openai.azure.com/
 AZURE_API_VERSION=2024-12-01-preview
 AZURE_MODEL=o4-mini
+LLM_MAX_RETRIES=4
+LLM_BACKOFF_BASE_S=1.0
+LLM_BACKOFF_MAX_S=15.0
+LLM_MIN_CALL_INTERVAL_S=0.5
 ```
 
 ---
@@ -302,6 +332,16 @@ AZURE_MODEL=o4-mini
 | Input sanitization | Control characters stripped at every entry point |
 | Pydantic validation | All FastAPI request bodies validated with schemas |
 | Data exclusion | PDFs, processed data, logs, outputs, threads all in `.gitignore` |
+
+## LLM Reliability and Rate Limiting
+
+LLM calls now include production-style resilience safeguards:
+
+- **Retry on transient failures** in `src/llm_client.py` (e.g., 429, timeouts, 5xx).
+- **Exponential backoff with jitter** between retries (`LLM_BACKOFF_BASE_S`, `LLM_BACKOFF_MAX_S`).
+- **Configurable retry count** via `LLM_MAX_RETRIES`.
+- **Minimum call interval throttling** between consecutive requests via `LLM_MIN_CALL_INTERVAL_S`.
+- **Structured logging** for retry attempts and final failures for easier debugging and TA verification.
 
 ---
 

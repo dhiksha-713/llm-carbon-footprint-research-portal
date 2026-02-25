@@ -66,6 +66,12 @@ API_HOST        = os.getenv("API_HOST", "0.0.0.0")
 API_PORT        = int(os.getenv("API_PORT", "8000"))
 STREAMLIT_PORT  = int(os.getenv("STREAMLIT_PORT", "8501"))
 
+# ── LLM reliability / rate limiting ────────────────────────────────────────
+LLM_MAX_RETRIES        = int(os.getenv("LLM_MAX_RETRIES", "4"))
+LLM_BACKOFF_BASE_S     = float(os.getenv("LLM_BACKOFF_BASE_S", "1.0"))
+LLM_BACKOFF_MAX_S      = float(os.getenv("LLM_BACKOFF_MAX_S", "15.0"))
+LLM_MIN_CALL_INTERVAL_S = float(os.getenv("LLM_MIN_CALL_INTERVAL_S", "0.5"))
+
 # ── Evaluation ───────────────────────────────────────────────────────────
 CHUNK_PREVIEW_LEN    = int(os.getenv("CHUNK_PREVIEW_LEN", "200"))
 SCORE_PASS_THRESHOLD = float(os.getenv("SCORE_PASS_THRESHOLD", "3.5"))

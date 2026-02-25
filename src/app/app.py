@@ -17,7 +17,7 @@ from src.config import (
     PROCESSED_DIR, LOGS_DIR, OUTPUTS_DIR, MANIFEST_PATH,
     TOP_K, API_HOST, API_PORT,
 )
-from src.llm_client import get_llm_client
+from src.llm_client import get_llm_client, LLMServiceError
 from src.rag.rag import load_index, run_rag
 from src.rag.enhance_query_rewriting import run_enhanced_rag
 from src.eval.evaluation import EVAL_QUERIES, compute_summary
@@ -113,13 +113,18 @@ def query_rag(req: QueryRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    if req.mode == "enhanced":
-        result = run_enhanced_rag(clean, _state["index"], _state["store"],
-                                  _state["embed_model"], _state["client"])
-    else:
-        result = run_rag(clean, _state["index"], _state["store"],
-                         _state["embed_model"], _state["client"],
-                         top_k=req.top_k, mode=req.mode)
+    try:
+        if req.mode == "enhanced":
+            result = run_enhanced_rag(clean, _state["index"], _state["store"],
+                                      _state["embed_model"], _state["client"])
+        else:
+            result = run_rag(clean, _state["index"], _state["store"],
+                             _state["embed_model"], _state["client"],
+                             top_k=req.top_k, mode=req.mode)
+    except LLMServiceError as exc:
+        raise HTTPException(503, f"LLM provider unavailable after retries: {exc}")
+    except Exception as exc:
+        raise HTTPException(500, f"Unhandled query error: {exc}")
 
     return QueryResponse(
         run_id=result["run_id"], query=result["query"], mode=result["mode"],

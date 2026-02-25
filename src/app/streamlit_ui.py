@@ -24,6 +24,7 @@ from src.config import (
 )
 from src.utils import sanitize_query, safe_avg, load_eval_results, suggest_next_steps
 from src.artifacts import artifact_to_pdf
+from src.llm_client import LLMServiceError
 
 st.set_page_config(
     page_title="LLM Carbon Footprint Research Portal",
@@ -621,13 +622,22 @@ elif page == "Research":
             st.markdown(query)
 
         with st.chat_message("assistant"):
-            with st.status("Retrieving and generating...", expanded=True) as ps:
-                index, store, embed_model = _load_resources()
-                t0 = time.time()
-                result = _run_query(query, index, store, embed_model,
-                                    _get_client(chosen), mode)
-                elapsed = time.time() - t0
-                ps.update(label=f"Done ({elapsed:.1f}s)", state="complete")
+            try:
+                with st.status("Retrieving and generating...", expanded=True) as ps:
+                    index, store, embed_model = _load_resources()
+                    t0 = time.time()
+                    result = _run_query(query, index, store, embed_model,
+                                        _get_client(chosen), mode)
+                    elapsed = time.time() - t0
+                    ps.update(label=f"Done ({elapsed:.1f}s)", state="complete")
+            except LLMServiceError as exc:
+                st.error("LLM request failed after retries. Please wait a few seconds and try again.")
+                st.caption(f"Details: {exc}")
+                st.stop()
+            except Exception as exc:
+                st.error("Unexpected portal error while generating the answer.")
+                st.caption(f"Details: {exc}")
+                st.stop()
 
             st.markdown(result["answer"])
             cv = result["citation_validation"]
@@ -738,26 +748,35 @@ elif page == "Artifacts":
         except ValueError as e:
             st.error(str(e)); st.stop()
 
-        with st.status("Running RAG + generating artifact...", expanded=True) as ps:
-            index, store, embed_model = _load_resources()
-            client = _get_client(chosen)
-            result = _run_query(art_query, index, store, embed_model, client, "enhanced")
+        try:
+            with st.status("Running RAG + generating artifact...", expanded=True) as ps:
+                index, store, embed_model = _load_resources()
+                client = _get_client(chosen)
+                result = _run_query(art_query, index, store, embed_model, client, "enhanced")
 
-            from src.artifacts import (
-                generate_evidence_table, generate_annotated_bibliography,
-                generate_synthesis_memo, artifact_to_pdf,
-            )
+                from src.artifacts import (
+                    generate_evidence_table, generate_annotated_bibliography,
+                    generate_synthesis_memo, artifact_to_pdf,
+                )
 
-            if art_type == "Evidence Table":
-                artifact = generate_evidence_table(
-                    art_query, result["answer"], result["retrieved_chunks"], client)
-            elif art_type == "Annotated Bibliography":
-                artifact = generate_annotated_bibliography(
-                    art_query, result["answer"], result["retrieved_chunks"], client)
-            else:
-                artifact = generate_synthesis_memo(
-                    art_query, result["answer"], result["retrieved_chunks"], client)
-            ps.update(label="Artifact generated", state="complete")
+                if art_type == "Evidence Table":
+                    artifact = generate_evidence_table(
+                        art_query, result["answer"], result["retrieved_chunks"], client)
+                elif art_type == "Annotated Bibliography":
+                    artifact = generate_annotated_bibliography(
+                        art_query, result["answer"], result["retrieved_chunks"], client)
+                else:
+                    artifact = generate_synthesis_memo(
+                        art_query, result["answer"], result["retrieved_chunks"], client)
+                ps.update(label="Artifact generated", state="complete")
+        except LLMServiceError as exc:
+            st.error("Artifact generation failed because the LLM service is temporarily unavailable.")
+            st.caption(f"Details: {exc}")
+            st.stop()
+        except Exception as exc:
+            st.error("Unexpected portal error while generating the artifact.")
+            st.caption(f"Details: {exc}")
+            st.stop()
 
         st.markdown(artifact["markdown"])
         st.markdown("---")
